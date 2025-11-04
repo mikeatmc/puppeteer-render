@@ -49,7 +49,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 ENV PORT=4000
 
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy app source
 COPY . .
