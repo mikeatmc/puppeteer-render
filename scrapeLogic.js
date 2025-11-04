@@ -1,4 +1,3 @@
-import puppeteer from "puppeteer";
 import puppeteerExtra from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import fs from "fs";
@@ -8,20 +7,9 @@ import "dotenv/config";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-puppeteerExtra.use(StealthPlugin());
-
 const cookiePath = path.join(__dirname, "cookies.json");
 
-// Detect proper Chromium executable
-const getExecutablePath = () => {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  try {
-    return puppeteer.executablePath(); // works locally
-  } catch {
-    return "/usr/bin/chromium"; // fallback for Render/Docker
-  }
-};
+puppeteerExtra.use(StealthPlugin());
 
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
@@ -30,12 +18,7 @@ async function loginAndSaveCookies(page) {
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
 
-  try {
-    await page.waitForFunction(() => window.location.pathname.startsWith("/feed"), { timeout: 60000 });
-  } catch {
-    await page.waitForSelector("#global-nav", { timeout: 15000 }).catch(() => {});
-  }
-
+  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }).catch(() => {});
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
   console.log("✅ Cookies saved successfully.");
@@ -45,16 +28,15 @@ async function loginAndSaveCookies(page) {
 async function ensureLoggedIn(page, profileUrl) {
   let needLogin = false;
 
-  if (!fs.existsSync(cookiePath)) needLogin = true;
-  else {
+  if (fs.existsSync(cookiePath)) {
     try {
-      const cookies = JSON.parse(fs.readFileSync(cookiePath, "utf8"));
+      const cookies = JSON.parse(fs.readFileSync(cookiePath));
       if (cookies.length) await page.setCookie(...cookies);
       else needLogin = true;
     } catch {
       needLogin = true;
     }
-  }
+  } else needLogin = true;
 
   if (needLogin) await loginAndSaveCookies(page);
 
@@ -70,18 +52,16 @@ export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
 
   console.log("🚀 Launching Chromium...");
-
   const browser = await puppeteerExtra.launch({
     headless: true,
-    executablePath: getExecutablePath(),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--no-zygote",
-      "--single-process",
-    ],
+      "--single-process"
+    ]
   });
 
   const page = await browser.newPage();
