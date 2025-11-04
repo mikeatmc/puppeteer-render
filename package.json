@@ -1,22 +1,17 @@
 {
   "name": "puppeteer-render",
   "version": "1.0.0",
-  "description": "",
+  "description": "LinkedIn scraper using Puppeteer + Render",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@sparticuz/chromium": "^123.0.0",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
-    "puppeteer": "^24.28.0",
-    "puppeteer-core": "^22.4.1",
+    "puppeteer": "^22.0.0",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.1",
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
   }
 }
