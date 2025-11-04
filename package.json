@@ -1,18 +1,17 @@
 {
-  "name": "puppeteer-render",
+  "name": "linkedin-scraper",
   "version": "1.0.0",
-  "description": "",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "dotenv": "^16.0.3",
-    "express": "^4.18.2",
-    "puppeteer": "^19.7.2"
+    "@sparticuz/chromium": "^123.0.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.2",
+    "puppeteer-core": "^22.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.1"
   }
 }
