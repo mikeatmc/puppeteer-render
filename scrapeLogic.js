@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const cookiePath = path.join(__dirname, "cookies.json");
 
-// Login to LinkedIn and save cookies
+// 🔐 Login to LinkedIn
 async function loginLinkedIn(page) {
   console.log("🔐 Logging into LinkedIn...");
   await page.goto("https://www.linkedin.com/login", {
@@ -38,7 +38,7 @@ async function loginLinkedIn(page) {
   return cookies;
 }
 
-// Use existing cookies if available
+// 🍪 Load cookies if available
 async function useCookies(page) {
   if (!fs.existsSync(cookiePath)) {
     console.log("⚠️ No cookie file found.");
@@ -56,49 +56,67 @@ async function useCookies(page) {
   }
 }
 
-// Scrape a LinkedIn profile and return simple fields
+// 🚀 Retry wrapper for launching Chromium
+async function launchBrowserWithRetry(tries = 3) {
+  const isProd = process.env.NODE_ENV === "production";
+  const executablePath = isProd
+    ? (await chromium.executablePath()) ||
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
+      "/usr/bin/chromium"
+    : undefined;
+
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      console.log(`🧩 Launch attempt ${attempt}...`);
+      const browser = await puppeteerExtra.launch({
+        executablePath,
+        headless: true,
+        ignoreHTTPSErrors: true,
+        args: isProd
+          ? [
+              ...chromium.args,
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--single-process",
+              "--disable-dev-shm-usage",
+              "--no-zygote",
+            ]
+          : [],
+      });
+      console.log("✅ Chromium launched successfully!");
+      return browser;
+    } catch (err) {
+      console.error(`❌ Launch failed (attempt ${attempt}):`, err.message);
+      if (attempt === tries) throw err;
+      console.log("⏳ Retrying in 2 seconds...");
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
+// 🌐 Main scrape function
 export async function scrapeProfile(profileUrl) {
   if (!profileUrl || typeof profileUrl !== "string") {
     throw new Error("profileUrl must be a valid URL string");
   }
 
   console.log("🚀 Launching Chromium...");
-
-  const executablePath =
-            (await chromium.executablePath()) ||
-            process.env.PUPPETEER_EXECUTABLE_PATH ||
-            "/opt/render/project/src/node_modules/@sparticuz/chromium/bin/chromium";
-
-  const browser = await puppeteerExtra.launch({
-    args: [
-      ...chromium.args,
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--single-process",
-      "--disable-dev-shm-usage",
-      "--no-zygote",
-    ],
-    defaultViewport: chromium.defaultViewport,
-    executablePath,
-    headless: true,
-    ignoreHTTPSErrors: true,
-    timeout: 0,
-  });
+  const browser = await launchBrowserWithRetry();
 
   const page = await browser.newPage();
   await page.setDefaultNavigationTimeout(120000);
   await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
       "AppleWebKit/537.36 (KHTML, like Gecko) " +
       "Chrome/120.0.0.0 Safari/537.36"
   );
 
-  const cookiesUsed = await useCookies(page);
+  let cookiesUsed = await useCookies(page);
   if (!cookiesUsed) {
     if (!process.env.LINKEDIN_EMAIL || !process.env.LINKEDIN_PASSWORD) {
       await browser.close();
       throw new Error(
-          "No cookies and missing LINKEDIN_EMAIL / LINKEDIN_PASSWORD environment variables"
+        "No cookies and missing LINKEDIN_EMAIL / LINKEDIN_PASSWORD environment variables"
       );
     }
     await loginLinkedIn(page);
@@ -109,33 +127,60 @@ export async function scrapeProfile(profileUrl) {
   console.log("🌐 Opening LinkedIn profile:", profileUrl);
   await page.goto(profileUrl, { waitUntil: "networkidle2", timeout: 120000 });
 
-  // If redirected to login page, login again
-  if (page.url().includes("/login")) {
-    console.log("🔁 Session expired — logging in again...");
+  // 🧠 Detect redirect to login/join page
+  const currentURL = page.url();
+  if (currentURL.includes("/join") || currentURL.includes("/login")) {
+    console.log("🔁 Detected LinkedIn login redirect — reauthenticating...");
     await loginLinkedIn(page);
     await page.goto(profileUrl, { waitUntil: "networkidle2", timeout: 120000 });
   }
 
-  // Wait for key selectors (name)
+  // Wait for main content
   await page.waitForSelector("h1", { timeout: 60000 }).catch(async () => {
     console.log("⚠️ Name not found, trying reload...");
     await page.reload({ waitUntil: "networkidle2" });
   });
 
+  // Extract data
   const data = await page.evaluate(() => {
     const name = document.querySelector("h1")?.innerText?.trim() || "";
     const headline =
-              document.querySelector(".text-body-medium.break-words")?.innerText?.trim() || "";
+      document.querySelector(".text-body-medium.break-words")?.innerText?.trim() || "";
     const location =
-              document.querySelector(".pv-text-details__left-panel div.text-body-small")?.innerText?.trim() || "";
+      document.querySelector(".pv-text-details__left-panel div.text-body-small")?.innerText?.trim() || "";
     const photo =
-              document.querySelector(".pv-top-card-profile-picture__image")?.src ||
-              document.querySelector(".profile-photo-edit__preview")?.src ||
-              "";
+      document.querySelector(".pv-top-card-profile-picture__image")?.src ||
+      document.querySelector(".profile-photo-edit__preview")?.src ||
+      "";
     return { name, headline, location, photo, scrapedAt: new Date().toISOString() };
   });
 
   console.log("📦 Data extracted:", data);
+
+  // Check if it's still showing "Join LinkedIn" (means login failed)
+  if (data.name.toLowerCase().includes("join linkedin")) {
+    console.log("⚠️ Detected Join LinkedIn page — refreshing session...");
+    await loginLinkedIn(page);
+    await page.goto(profileUrl, { waitUntil: "networkidle2", timeout: 120000 });
+
+    const refreshedData = await page.evaluate(() => {
+      const name = document.querySelector("h1")?.innerText?.trim() || "";
+      const headline =
+        document.querySelector(".text-body-medium.break-words")?.innerText?.trim() || "";
+      const location =
+        document.querySelector(".pv-text-details__left-panel div.text-body-small")?.innerText?.trim() || "";
+      const photo =
+        document.querySelector(".pv-top-card-profile-picture__image")?.src ||
+        document.querySelector(".profile-photo-edit__preview")?.src ||
+        "";
+      return { name, headline, location, photo, scrapedAt: new Date().toISOString() };
+    });
+
+    console.log("📦 Data re-extracted after login:", refreshedData);
+    await browser.close();
+    return refreshedData;
+  }
+
   await browser.close();
   return data;
 }
