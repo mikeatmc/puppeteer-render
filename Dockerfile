@@ -1,7 +1,7 @@
-# Use official Node LTS image
+# ---- Base image ----
 FROM node:20-slim
 
-# Install Chromium dependencies
+# ---- Install Chromium and dependencies ----
 RUN apt-get update && apt-get install -y \
   chromium \
   ca-certificates \
@@ -23,21 +23,22 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# ---- Set work directory ----
 WORKDIR /usr/src/app
 
-# Copy files
+# ---- Copy dependency files ----
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
-# Copy app source
+# ---- Copy source ----
 COPY . .
 
-# Puppeteer setup
+# ---- Environment variables ----
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV CHROME_PATH=/usr/bin/chromium
+ENV NODE_ENV=production
 ENV PORT=4000
-EXPOSE 4000
 
-# Run the app
+# ---- Expose and run ----
+EXPOSE 4000
 CMD ["node", "index.js"]
