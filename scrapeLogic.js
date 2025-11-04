@@ -51,23 +51,22 @@ export async function scrapeProfile(profileUrl) {
 
   console.log("🚀 Launching Chromium...");
   const browser = await puppeteerExtra.launch({
-    headless: true,
-    executablePath: process.env.CHROME_PATH || "/usr/bin/chromium-browser",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--disable-extensions",
-      "--disable-software-rasterizer",
-      "--no-zygote",
-      "--single-process",
-      "--ignore-certificate-errors",
-      "--window-size=1920,1080",
-    ],
-    timeout: 0,
-    env: { TMPDIR: process.env.TMPDIR || "/usr/src/app/tmp" },
-  });
+  headless: true,
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-zygote',
+    '--single-process',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
+    '--window-size=1920,1080',
+  ],
+  timeout: 0,
+});
 
   const page = await browser.newPage();
   await ensureLoggedIn(page, profileUrl);
