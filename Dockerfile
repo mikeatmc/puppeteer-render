@@ -1,32 +1,29 @@
-# ✅ Puppeteer official image (includes Chromium)
+# ✅ Use Puppeteer official image (includes Chromium)
 FROM ghcr.io/puppeteer/puppeteer:21.5.0
 
 # Set working directory
 WORKDIR /usr/src/app
 
-# Ensure pptruser owns the working directory
-USER root
-RUN mkdir -p /usr/src/app && chown -R pptruser:pptruser /usr/src/app
-
-# Copy dependency files first (better caching)
+# Copy dependency files first
 COPY package*.json ./
 
-# Switch to pptruser before npm install
-USER pptruser
-
-# Install dependencies (no dev deps)
+# ✅ Install dependencies as root (avoids permission issues)
 RUN npm install --omit=dev
 
-# Copy the rest of the app
-COPY --chown=pptruser:pptruser . .
+# ✅ Copy the rest of your app and give ownership to pptruser
+COPY . .
+RUN chown -R pptruser:pptruser /usr/src/app
 
-# Puppeteer environment variables
+# Puppeteer environment setup
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV CHROME_PATH=/usr/bin/google-chrome-stable
 ENV PORT=4000
 
 EXPOSE 4000
+
+# ✅ Switch to non-root user for runtime
+USER pptruser
 
 # Run the app
 CMD ["node", "index.js"]
