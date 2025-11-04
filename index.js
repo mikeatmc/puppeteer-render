@@ -3,11 +3,12 @@ import dotenv from "dotenv";
 import { scrapeProfile } from "./scrapeLogic.js";
 
 dotenv.config();
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.get("/", (req, res) => {
-  res.send("✅ Puppeteer LinkedIn scraper running!");
+  res.send("✅ Puppeteer LinkedIn Scraper API is running!");
 });
 
 app.get("/scrape", async (req, res) => {
@@ -23,11 +24,6 @@ app.get("/scrape", async (req, res) => {
   }
 });
 
-// ✅ Only log locally (not on Render)
-app.listen(PORT, () => {
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`🚀 Server running locally at http://localhost:${PORT}`);
-  } else {
-    console.log("🚀 Server running on Render!");
-  }
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
