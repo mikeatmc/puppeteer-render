@@ -1,24 +1,11 @@
-# Use official Puppeteer image (includes Chrome)
-FROM ghcr.io/puppeteer/puppeteer:21.5.0
+FROM ghcr.io/puppeteer/puppeteer:19.7.2
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-
-USER root
-
-RUN chmod -R 777 /usr/src/app && npm install --omit=dev
-
+RUN npm ci
 COPY . .
-
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV CHROME_PATH=/usr/bin/chromium
-ENV PORT=4000
-
-EXPOSE 4000
-
-RUN chown -R pptruser:pptruser /usr/src/app
-USER pptruser
-
-CMD ["node", "index.js"]
+CMD [ "node", "index.js" ]
