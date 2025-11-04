@@ -10,20 +10,29 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 puppeteerExtra.use(StealthPlugin());
-
 const cookiePath = path.join(__dirname, "cookies.json");
+
+async function delay(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
 
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
-  await page.goto("https://www.linkedin.com/login", { waitUntil: "networkidle2", timeout: 60000 });
+  await page.goto("https://www.linkedin.com/login", {
+    waitUntil: "networkidle2",
+    timeout: 180000, // 3 min timeout for slow networks
+  });
+
   await page.type("#username", process.env.LINKEDIN_EMAIL, { delay: 50 });
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
 
   try {
-    await page.waitForFunction(() => window.location.pathname.startsWith("/feed"), { timeout: 60000 });
+    await page.waitForFunction(() => window.location.pathname.startsWith("/feed"), {
+      timeout: 180000,
+    });
   } catch {
-    await page.waitForSelector("#global-nav", { timeout: 15000 }).catch(() => {});
+    await page.waitForSelector("#global-nav", { timeout: 30000 }).catch(() => {});
   }
 
   const cookies = await page.cookies();
@@ -49,58 +58,79 @@ async function ensureLoggedIn(page, profileUrl) {
 
   if (needLogin) await loginAndSaveCookies(page);
 
-  await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+  // Retry loading the profile page up to 3 times
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      console.log(`🌐 Loading profile page (attempt ${attempt})...`);
+      await page.goto(profileUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 180000,
+      });
+      if (!page.url().includes("/login")) break;
+    } catch (err) {
+      console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
+      if (attempt === 3) throw err;
+      await delay(5000);
+    }
+  }
+
   if (page.url().includes("/login")) {
+    console.log("🔁 Session expired — re-logging in...");
     const cookies = await loginAndSaveCookies(page);
     await page.setCookie(...cookies);
-    await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 180000 });
   }
 }
 
 export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
 
+  console.log("🚀 Launching Chromium...");
   const browser = await puppeteerExtra.launch({
     headless: true,
-    executablePath: process.env.CHROME_PATH || '/usr/bin/chromium',
+    executablePath: process.env.CHROME_PATH || "/usr/bin/chromium",
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-zygote',
-      '--single-process'
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process",
     ],
   });
 
   const page = await browser.newPage();
+  page.setDefaultNavigationTimeout(180000); // 3 min for all navigations
+
   await ensureLoggedIn(page, profileUrl);
 
-  const fullName = await page.$eval("h1", el => el.innerText.trim()).catch(() => "");
+  const fullName = await page.$eval("h1", (el) => el.innerText.trim()).catch(() => "");
   const [firstName, ...lastNameParts] = fullName.split(" ");
   const lastName = lastNameParts.join(" ");
 
   let profilePhoto = "";
   try {
     profilePhoto = await page.$eval(
-        `
+      `
         img.pv-top-card-profile-picture__image--show,
         img.pv-top-card-profile-picture__image,
         img.profile-photo-edit__preview,
         .pv-top-card img,
         .pv-top-card__photo img
       `,
-        el => el.src
+      (el) => el.src
     );
   } catch {}
 
-  let jobTitle = "", company = "";
+  let jobTitle = "",
+    company = "";
   try {
-    await page.waitForSelector("#experience", { timeout: 15000 });
+    await page.waitForSelector("#experience", { timeout: 20000 });
     const result = await page.evaluate(() => {
       const anchor = document.querySelector("#experience");
       let node = anchor?.parentElement;
-      let jobTitle = "", company = "";
+      let jobTitle = "",
+        company = "";
       while (node && !jobTitle && !company) {
         const entity = node.querySelector('[data-view-name="profile-component-entity"]');
         if (entity) {
@@ -120,5 +150,6 @@ export async function scrapeProfile(profileUrl) {
   } catch {}
 
   await browser.close();
+  console.log("✅ Scraping done.");
   return { firstName, lastName, profilePhoto, jobTitle, company };
 }
