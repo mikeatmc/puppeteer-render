@@ -11,9 +11,28 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/**
- * Helper: Waits safely with retries for navigation
- */
+/** ✅ Helper to detect available Chrome binary */
+function getChromePath() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/local/bin/chromium",
+  ].filter(Boolean);
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      console.log(`🧭 Found Chromium binary: ${p}`);
+      return p;
+    }
+  }
+
+  console.warn("⚠️ No system Chromium found — Puppeteer will download one (slower start).");
+  return undefined;
+}
+
+/** Safe navigation with retries */
 async function safeGoto(page, url, options = {}) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -37,9 +56,7 @@ async function safeGoto(page, url, options = {}) {
   }
 }
 
-/**
- * Logs into LinkedIn and saves cookies
- */
+/** Logs into LinkedIn and saves cookies */
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
   await safeGoto(page, "https://www.linkedin.com/login");
@@ -48,7 +65,6 @@ async function loginAndSaveCookies(page) {
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
 
-  // Wait for either feed or login retry
   await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
@@ -56,9 +72,7 @@ async function loginAndSaveCookies(page) {
   return cookies;
 }
 
-/**
- * Ensures user is logged in (using cookies or re-login)
- */
+/** Ensures user is logged in */
 async function ensureLoggedIn(page, profileUrl) {
   let needLogin = false;
 
@@ -85,20 +99,16 @@ async function ensureLoggedIn(page, profileUrl) {
   }
 }
 
-/**
- * Main scrape function
- */
+/** Main scraper */
 export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
 
   console.log("🚀 Launching Chromium...");
+  const executablePath = getChromePath();
+
   const browser = await puppeteerExtra.launch({
     headless: true,
-    executablePath:
-      process.env.CHROME_PATH ||
-      "/usr/bin/google-chrome" ||
-      "/usr/bin/chromium-browser" ||
-      "/usr/bin/chromium",
+    executablePath,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
