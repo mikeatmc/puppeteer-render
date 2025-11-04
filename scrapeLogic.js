@@ -1,40 +1,28 @@
 import puppeteer from "puppeteer";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import puppeteerExtra from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import fs from "fs";
 import path from "path";
-import "dotenv/config";
 import { fileURLToPath } from "url";
+import "dotenv/config";
+
+puppeteerExtra.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-puppeteerExtra.use(StealthPlugin());
 const cookiePath = path.join(__dirname, "cookies.json");
-
-async function delay(ms) {
-  return new Promise((res) => setTimeout(res, ms));
-}
 
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
   await page.goto("https://www.linkedin.com/login", {
     waitUntil: "networkidle2",
-    timeout: 180000, // 3 min timeout for slow networks
+    timeout: 90000,
   });
-
   await page.type("#username", process.env.LINKEDIN_EMAIL, { delay: 50 });
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
 
-  try {
-    await page.waitForFunction(() => window.location.pathname.startsWith("/feed"), {
-      timeout: 180000,
-    });
-  } catch {
-    await page.waitForSelector("#global-nav", { timeout: 30000 }).catch(() => {});
-  }
-
+  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 90000 }).catch(() => {});
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
   console.log("✅ Cookies saved successfully.");
@@ -42,43 +30,19 @@ async function loginAndSaveCookies(page) {
 }
 
 async function ensureLoggedIn(page, profileUrl) {
-  let needLogin = false;
-
-  if (!fs.existsSync(cookiePath)) {
-    needLogin = true;
-  } else {
+  if (fs.existsSync(cookiePath)) {
     try {
       const cookies = JSON.parse(fs.readFileSync(cookiePath, "utf8"));
-      if (!cookies.length) needLogin = true;
-      else await page.setCookie(...cookies);
-    } catch {
-      needLogin = true;
-    }
+      if (cookies.length) await page.setCookie(...cookies);
+    } catch {}
+  } else {
+    await loginAndSaveCookies(page);
   }
 
-  if (needLogin) await loginAndSaveCookies(page);
-
-  // Retry loading the profile page up to 3 times
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      console.log(`🌐 Loading profile page (attempt ${attempt})...`);
-      await page.goto(profileUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 180000,
-      });
-      if (!page.url().includes("/login")) break;
-    } catch (err) {
-      console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
-      if (attempt === 3) throw err;
-      await delay(5000);
-    }
-  }
-
+  await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
   if (page.url().includes("/login")) {
-    console.log("🔁 Session expired — re-logging in...");
-    const cookies = await loginAndSaveCookies(page);
-    await page.setCookie(...cookies);
-    await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 180000 });
+    await loginAndSaveCookies(page);
+    await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
   }
 }
 
@@ -88,68 +52,31 @@ export async function scrapeProfile(profileUrl) {
   console.log("🚀 Launching Chromium...");
   const browser = await puppeteerExtra.launch({
     headless: true,
-    executablePath: process.env.CHROME_PATH || "/usr/bin/chromium",
+    executablePath: process.env.CHROME_PATH || "/usr/bin/chromium-browser",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
+      "--disable-extensions",
+      "--disable-software-rasterizer",
       "--no-zygote",
       "--single-process",
+      "--ignore-certificate-errors",
+      "--window-size=1920,1080",
     ],
+    timeout: 0,
+    env: { TMPDIR: process.env.TMPDIR || "/usr/src/app/tmp" },
   });
 
   const page = await browser.newPage();
-  page.setDefaultNavigationTimeout(180000); // 3 min for all navigations
-
   await ensureLoggedIn(page, profileUrl);
 
-  const fullName = await page.$eval("h1", (el) => el.innerText.trim()).catch(() => "");
-  const [firstName, ...lastNameParts] = fullName.split(" ");
-  const lastName = lastNameParts.join(" ");
-
-  let profilePhoto = "";
-  try {
-    profilePhoto = await page.$eval(
-      `
-        img.pv-top-card-profile-picture__image--show,
-        img.pv-top-card-profile-picture__image,
-        img.profile-photo-edit__preview,
-        .pv-top-card img,
-        .pv-top-card__photo img
-      `,
-      (el) => el.src
-    );
-  } catch {}
-
-  let jobTitle = "",
-    company = "";
-  try {
-    await page.waitForSelector("#experience", { timeout: 20000 });
-    const result = await page.evaluate(() => {
-      const anchor = document.querySelector("#experience");
-      let node = anchor?.parentElement;
-      let jobTitle = "",
-        company = "";
-      while (node && !jobTitle && !company) {
-        const entity = node.querySelector('[data-view-name="profile-component-entity"]');
-        if (entity) {
-          const titleEl = entity.querySelector(".t-bold span[aria-hidden]");
-          const companyEl = entity.querySelector(".t-normal span[aria-hidden]");
-          jobTitle = titleEl?.innerText?.trim() || "";
-          company = companyEl?.innerText?.trim() || "";
-          if (company.includes("·")) company = company.split("·")[0].trim();
-          break;
-        }
-        node = node.nextElementSibling;
-      }
-      return { jobTitle, company };
-    });
-    jobTitle = result.jobTitle || "";
-    company = result.company || "";
-  } catch {}
+  const name = await page.$eval("h1", (el) => el.innerText.trim()).catch(() => "");
+  const headline = await page.$eval(".text-body-medium.break-words", (el) => el.innerText.trim()).catch(() => "");
+  const location = await page.$eval(".pv-text-details__left-panel div.text-body-small", (el) => el.innerText.trim()).catch(() => "");
+  const photo = await page.$eval("img.pv-top-card-profile-picture__image, .profile-photo-edit__preview", (el) => el.src).catch(() => "");
 
   await browser.close();
-  console.log("✅ Scraping done.");
-  return { firstName, lastName, profilePhoto, jobTitle, company };
+  return { name, headline, location, photo, scrapedAt: new Date().toISOString() };
 }
