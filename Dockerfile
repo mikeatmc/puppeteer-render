@@ -1,30 +1,7 @@
-# Use Node 20 slim base
-FROM node:20-slim
+# ✅ Use Puppeteer's official base image (includes Chromium)
+FROM ghcr.io/puppeteer/puppeteer:21.5.0
 
-# Install Chromium + dependencies
-RUN apt-get update && apt-get install -y \
-  chromium \
-  chromium-browser \
-  ca-certificates \
-  fonts-liberation \
-  libasound2 \
-  libatk-bridge2.0-0 \
-  libatk1.0-0 \
-  libcups2 \
-  libdbus-1-3 \
-  libdrm2 \
-  libxkbcommon0 \
-  libxcomposite1 \
-  libxdamage1 \
-  libxrandr2 \
-  libgbm1 \
-  libgtk-3-0 \
-  wget \
-  gnupg \
-  --no-install-recommends && \
-  rm -rf /var/lib/apt/lists/*
-
-# Working directory
+# Set working directory
 WORKDIR /usr/src/app
 
 # Copy dependencies and install
@@ -36,11 +13,11 @@ COPY . .
 
 # Puppeteer environment
 ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV CHROME_PATH=/usr/bin/chromium-browser
-ENV TMPDIR=/usr/src/app/tmp
-RUN mkdir -p /usr/src/app/tmp
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+ENV CHROME_PATH=/usr/bin/google-chrome-stable
 ENV PORT=4000
+
 EXPOSE 4000
 
-# Start app
+# Run your app
 CMD ["node", "index.js"]
