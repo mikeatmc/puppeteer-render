@@ -1,9 +1,10 @@
-# ---- Base image ----
+# Use Node 20 slim base
 FROM node:20-slim
 
-# ---- Install Chromium and dependencies ----
+# Install Chromium + dependencies
 RUN apt-get update && apt-get install -y \
   chromium \
+  chromium-browser \
   ca-certificates \
   fonts-liberation \
   libasound2 \
@@ -23,22 +24,23 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# ---- Set work directory ----
+# Working directory
 WORKDIR /usr/src/app
 
-# ---- Copy dependency files ----
+# Copy dependencies and install
 COPY package*.json ./
 RUN npm install --omit=dev
 
-# ---- Copy source ----
+# Copy app code
 COPY . .
 
-# ---- Environment variables ----
+# Puppeteer environment
 ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV CHROME_PATH=/usr/bin/chromium
-ENV NODE_ENV=production
+ENV CHROME_PATH=/usr/bin/chromium-browser
+ENV TMPDIR=/usr/src/app/tmp
+RUN mkdir -p /usr/src/app/tmp
 ENV PORT=4000
-
-# ---- Expose and run ----
 EXPOSE 4000
+
+# Start app
 CMD ["node", "index.js"]
