@@ -1,7 +1,7 @@
 {
-  "name": "puppeteer-render",
+  "name": "puppeteer-railway",
   "version": "1.0.0",
-  "description": "LinkedIn scraper using Puppeteer + Render",
+  "description": "LinkedIn scraper using Puppeteer + Railway",
   "type": "module",
   "main": "index.js",
   "scripts": {
