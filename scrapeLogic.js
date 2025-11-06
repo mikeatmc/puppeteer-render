@@ -148,22 +148,31 @@ export async function scrapeProfile(profileUrl) {
     // First experience (jobTitle + company)
     let jobTitle = "", company = "";
     try {
-      await page.waitForSelector("#experience", { timeout: 20000 });
+      await page.waitForSelector("#experience", { timeout: 15000 });
       const result = await page.evaluate(() => {
-        const items = Array.from(document.querySelectorAll("#experience li"));
-        for (const exp of items) {
-          const titleEl = exp.querySelector(".t-bold span[aria-hidden]");
-          const companyEl = exp.querySelector(".t-normal span[aria-hidden]");
-          const jobTitle = titleEl?.innerText?.trim() || "";
-          let company = companyEl?.innerText?.trim() || "";
-          if (company.includes("·")) company = company.split("·")[0].trim();
-          if (jobTitle && company) return { jobTitle, company };
+        const anchor = document.querySelector("#experience");
+        if (!anchor) return { jobTitle: "", company: "" };
+        let node = anchor.nextElementSibling;
+        while (node) {
+          const entity = node.querySelector('[data-view-name="profile-component-entity"]');
+          if (entity) {
+            const titleEl = entity.querySelector(".t-bold span[aria-hidden]");
+            const companyEl = entity.querySelector(".t-normal span[aria-hidden]");
+            let jobTitle = titleEl?.innerText?.trim() || "";
+            let company = companyEl?.innerText?.trim() || "";
+            if (company.includes("·")) company = company.split("·")[0].trim();
+            return { jobTitle, company };
+          }
+          node = node.nextElementSibling;
         }
         return { jobTitle: "", company: "" };
       });
       jobTitle = result.jobTitle || "";
       company = result.company || "";
-    } catch {}
+      console.log(`💼 Experience found: ${jobTitle} at ${company}`);
+    } catch {
+      console.log("⚠️ Experience not found");
+    }
 
     return { firstName, lastName, profilePhoto, jobTitle, company };
   } catch (err) {
