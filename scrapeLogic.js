@@ -91,7 +91,22 @@ async function autoScroll(page) {
 
 /** Main scraper */
 export async function scrapeProfile(profileUrl) {
-  if (!profileUrl) throw new Error("No profile URL provided");
+  const resultData = {
+    firstName: "",
+    lastName: "",
+    profilePhoto: "",
+    jobTitle: "",
+    company: ""
+  };
+
+  const returnObj = {
+    status: "error",
+    data: resultData
+  };
+
+  if (!profileUrl) {
+    return returnObj;
+  }
 
   const browser = await puppeteerExtra.launch({
     headless: true,
@@ -105,15 +120,16 @@ export async function scrapeProfile(profileUrl) {
 
     await ensureLoggedIn(page, profileUrl);
     await autoScroll(page);
+    await page.waitForTimeout(3000); // wait for lazy-loaded content
 
     // --- Name ---
     const nameSelectors = ["h1.text-heading-xlarge", "h1", ".pv-top-card--list li.inline.t-24.t-black.t-normal.break-words"];
-    let firstName = "", lastName = "";
     for (const sel of nameSelectors) {
       const fullName = await page.$eval(sel, el => el.innerText.trim()).catch(() => "");
       if (fullName) {
-        [firstName, ...lastName] = fullName.split(" ");
-        lastName = lastName.join(" ");
+        const [first, ...lastParts] = fullName.split(" ");
+        resultData.firstName = first;
+        resultData.lastName = lastParts.join(" ");
         break;
       }
     }
@@ -126,19 +142,21 @@ export async function scrapeProfile(profileUrl) {
       ".pv-top-card img",
       ".pv-top-card__photo img",
     ];
-    let profilePhoto = "";
     for (const sel of photoSelectors) {
       const imgHandle = await page.$(sel);
       if (imgHandle) {
-        profilePhoto = await page.evaluate(el => el.src || el.getAttribute("data-delayed-url") || el.getAttribute("data-src"), imgHandle).catch(() => "");
-        if (profilePhoto) break;
+        resultData.profilePhoto = await page.evaluate(
+          el => el.src || el.getAttribute("data-delayed-url") || el.getAttribute("data-src"),
+          imgHandle
+        ).catch(() => "");
+        if (resultData.profilePhoto) break;
       }
     }
 
     // --- First experience ---
-    let jobTitle = "", company = "";
     try {
-      const result = await page.evaluate(() => {
+      await page.waitForSelector("#experience li", { timeout: 30000 });
+      const expResult = await page.evaluate(() => {
         const items = Array.from(document.querySelectorAll("#experience li"));
         for (const exp of items) {
           const titleEl = exp.querySelector(".t-bold span[aria-hidden]");
@@ -150,14 +168,16 @@ export async function scrapeProfile(profileUrl) {
         }
         return { jobTitle: "", company: "" };
       });
-      jobTitle = result.jobTitle || "";
-      company = result.company || "";
+      resultData.jobTitle = expResult.jobTitle;
+      resultData.company = expResult.company;
     } catch {}
 
-    return { firstName, lastName, profilePhoto, jobTitle, company };
+    returnObj.status = "success";
+    returnObj.data = resultData;
+    return returnObj;
   } catch (err) {
     console.error("❌ Scrape failed:", err);
-    return { error: err.message };
+    return returnObj;
   } finally {
     await browser.close().catch(() => {});
   }
