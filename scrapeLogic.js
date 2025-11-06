@@ -11,27 +11,6 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-// Get Chromium binary path
-function getChromePath() {
-  const candidates = [
-    process.env.CHROME_PATH,
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome",
-    "/usr/local/bin/chromium",
-  ].filter(Boolean);
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      console.log(`🧭 Found Chromium binary: ${p}`);
-      return p;
-    }
-  }
-
-  console.warn("⚠️ No system Chromium found — Puppeteer will download one.");
-  return undefined;
-}
-
 // Safe page navigation
 async function safeGoto(page, url, options = {}) {
   const maxAttempts = 3;
@@ -94,11 +73,9 @@ export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
 
   console.log("🚀 Launching Chromium...");
-  const executablePath = getChromePath();
-
+  
   const browser = await puppeteerExtra.launch({
     headless: true,
-    executablePath,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
