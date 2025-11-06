@@ -85,7 +85,15 @@ async function ensureLoggedIn(page, profileUrl) {
   const pageTitle = await page.title();
   console.log("📌 Current page URL:", currentURL);
   console.log("📌 Page title:", pageTitle);
-
+  // Capture screenshot as Base64 and log directly
+  try {
+    const screenshot = await page.screenshot({ fullPage: true });
+    const screenshotBase64 = screenshot.toString("base64");
+    console.log("📸 Screenshot (Base64) directly in console:");
+    console.log(screenshotBase64);
+  } catch (err) {
+    console.log("⚠️ Failed to capture screenshot:", err.message);
+  }
   if (
     currentURL.includes("/login") ||
     currentURL.includes("checkpoint") ||
