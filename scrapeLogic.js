@@ -11,7 +11,7 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/** Safe navigation with retries */
+/** Helper: safe navigation with retries */
 async function safeGoto(page, url, options = {}) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -21,13 +21,13 @@ async function safeGoto(page, url, options = {}) {
       return;
     } catch (err) {
       console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
-      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 5000));
+      if (attempt < maxAttempts) await new Promise(r => setTimeout(r, 5000));
       else throw err;
     }
   }
 }
 
-/** Login and save cookies */
+/** Login to LinkedIn and save cookies */
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
   await safeGoto(page, "https://www.linkedin.com/login");
@@ -49,6 +49,7 @@ async function loginAndSaveCookies(page) {
 async function ensureLoggedIn(page, profileUrl) {
   let needLogin = true;
 
+  // Load existing cookies if available
   if (fs.existsSync(cookiePath)) {
     try {
       const cookies = JSON.parse(fs.readFileSync(cookiePath));
@@ -66,20 +67,34 @@ async function ensureLoggedIn(page, profileUrl) {
     await loginAndSaveCookies(page);
   }
 
-  // Navigate to profile page
+  // Navigate to profile
   await safeGoto(page, profileUrl);
 
-  // If redirected to login or landing page, force login
-  if (page.url().includes("/login") || page.url().includes("guest")) {
-    console.log("⚠️ Not logged in or cookies expired, logging in...");
+  // Check for login or checkpoint page
+  const currentURL = page.url();
+  const pageTitle = await page.title();
+  console.log("📌 Current page URL:", currentURL);
+  console.log("📌 Page title:", pageTitle);
+
+  if (
+    currentURL.includes("/login") ||
+    currentURL.includes("checkpoint") ||
+    pageTitle.toLowerCase().includes("sign in") ||
+    pageTitle.toLowerCase().includes("join linkedin")
+  ) {
+    console.log("⚠️ Not logged in or cookies invalid, performing fresh login...");
     const cookies = await loginAndSaveCookies(page);
     await page.setCookie(...cookies);
     await safeGoto(page, profileUrl);
   }
 
-  // Wait for profile content
-  await page.waitForSelector('.pv-top-card', { timeout: 15000 });
-  console.log("✅ Profile page loaded successfully");
+  // Wait for actual profile page content
+  try {
+    await page.waitForSelector('.pv-top-card', { timeout: 30000 });
+    console.log("✅ Profile page loaded successfully");
+  } catch {
+    throw new Error("Failed to load LinkedIn profile. Check credentials or cookies.");
+  }
 }
 
 /** Main scraper */
@@ -106,7 +121,7 @@ export async function scrapeProfile(profileUrl) {
     await page.setDefaultNavigationTimeout(180000);
     await page.setViewport({ width: 1366, height: 768 });
 
-    // Ensure logged in and profile accessible
+    // Ensure login and profile accessibility
     await ensureLoggedIn(page, profileUrl);
 
     /** --- Scrape full name --- */
