@@ -85,15 +85,7 @@ async function ensureLoggedIn(page, profileUrl) {
   const pageTitle = await page.title();
   console.log("📌 Current page URL:", currentURL);
   console.log("📌 Page title:", pageTitle);
-  // Capture screenshot as Base64 and log directly
-  try {
-    const screenshot = await page.screenshot({ fullPage: true });
-    const screenshotBase64 = screenshot.toString("base64");
-    console.log("📸 Screenshot (Base64) directly in console:");
-    console.log(screenshotBase64);
-  } catch (err) {
-    console.log("⚠️ Failed to capture screenshot:", err.message);
-  }
+  
   if (
     currentURL.includes("/login") ||
     currentURL.includes("checkpoint") ||
@@ -104,28 +96,6 @@ async function ensureLoggedIn(page, profileUrl) {
     const cookies = await loginAndSaveCookies(page);
     await page.setCookie(...cookies);
     await safeGoto(page, profileUrl);
-  }
-
-  // Robust profile card detection
-  const topCardSelectors = [
-    '.pv-top-card',
-    '.profile-topcard',
-    '.top-card-layout',
-    '.org-top-card'
-  ];
-
-  let topCardFound = false;
-  for (const sel of topCardSelectors) {
-    try {
-      await page.waitForSelector(sel, { timeout: 15000 });
-      topCardFound = true;
-      console.log(`✅ Profile card found with selector: ${sel}`);
-      break;
-    } catch {}
-  }
-
-  if (!topCardFound) {
-    throw new Error("Failed to load LinkedIn profile. DOM layout may have changed.");
   }
 }
 
