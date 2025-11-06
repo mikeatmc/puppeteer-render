@@ -11,26 +11,14 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/** Safe navigation with retries */
+/** Navigate safely to a URL */
 async function safeGoto(page, url) {
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      console.log(`🌐 Navigating to ${url} (Attempt ${attempt})...`);
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
-      return;
-    } catch (err) {
-      console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
-      if (attempt < maxAttempts) {
-        console.log("⏳ Retrying in 5 seconds...");
-        await new Promise(r => setTimeout(r, 5000));
-        const pages = await page.browser().pages();
-        if (pages.includes(page)) await page.close();
-        page = await page.browser().newPage();
-      } else {
-        throw err;
-      }
-    }
+  try {
+    console.log(`🌐 Navigating to ${url}...`);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
+  } catch (err) {
+    console.log(`⚠️ Navigation failed: ${err.message}`);
+    throw err;
   }
 }
 
@@ -44,6 +32,7 @@ async function loginAndSaveCookies(page) {
   await page.click('button[type="submit"]');
 
   await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
   console.log("✅ Cookies saved successfully.");
@@ -52,24 +41,20 @@ async function loginAndSaveCookies(page) {
 
 /** Ensure logged in and navigate to profile */
 async function ensureLoggedIn(page, profileUrl) {
-  let needLogin = true;
   if (fs.existsSync(cookiePath)) {
     try {
       const cookies = JSON.parse(fs.readFileSync(cookiePath));
-      if (cookies.length) {
-        await page.setCookie(...cookies);
-        needLogin = false;
-        console.log("🍪 Loaded saved cookies");
-      }
+      if (cookies.length) await page.setCookie(...cookies);
+      console.log("🍪 Loaded saved cookies");
     } catch {
-      needLogin = true;
+      await loginAndSaveCookies(page);
     }
-  }
-  if (needLogin) {
+  } else {
     await loginAndSaveCookies(page);
   }
 
   await safeGoto(page, profileUrl);
+
   const currentURL = page.url();
   const pageTitle = await page.title();
   if (
@@ -110,69 +95,64 @@ export async function scrapeProfile(profileUrl) {
 
   const browser = await puppeteerExtra.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-      "--disable-extensions",
-      "--single-process",
-      "--window-size=1920,1080",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
   try {
     const page = await browser.newPage();
-    await page.setDefaultNavigationTimeout(180000);
     await page.setViewport({ width: 1366, height: 768 });
+    await page.setDefaultNavigationTimeout(180000);
 
     await ensureLoggedIn(page, profileUrl);
     await autoScroll(page);
 
-    // Name
-    const fullName = await page.$eval("h1", el => el.innerText.trim()).catch(() => "");
-    const [firstName, ...lastNameParts] = fullName.split(" ");
-    const lastName = lastNameParts.join(" ");
+    // --- Name ---
+    const nameSelectors = ["h1.text-heading-xlarge", "h1", ".pv-top-card--list li.inline.t-24.t-black.t-normal.break-words"];
+    let firstName = "", lastName = "";
+    for (const sel of nameSelectors) {
+      const fullName = await page.$eval(sel, el => el.innerText.trim()).catch(() => "");
+      if (fullName) {
+        [firstName, ...lastName] = fullName.split(" ");
+        lastName = lastName.join(" ");
+        break;
+      }
+    }
 
-    // Profile photo
-    const profilePhoto = await page.$eval(
-      `img.pv-top-card-profile-picture__image--show,
-       img.pv-top-card-profile-picture__image,
-       img.profile-photo-edit__preview,
-       .pv-top-card img,
-       .pv-top-card__photo img`,
-      el => el.src || el.getAttribute("data-delayed-url") || el.getAttribute("data-src")
-    ).catch(() => "");
+    // --- Profile photo ---
+    const photoSelectors = [
+      "img.pv-top-card-profile-picture__image--show",
+      "img.pv-top-card-profile-picture__image",
+      "img.profile-photo-edit__preview",
+      ".pv-top-card img",
+      ".pv-top-card__photo img",
+    ];
+    let profilePhoto = "";
+    for (const sel of photoSelectors) {
+      const imgHandle = await page.$(sel);
+      if (imgHandle) {
+        profilePhoto = await page.evaluate(el => el.src || el.getAttribute("data-delayed-url") || el.getAttribute("data-src"), imgHandle).catch(() => "");
+        if (profilePhoto) break;
+      }
+    }
 
-    // First experience (jobTitle + company)
+    // --- First experience ---
     let jobTitle = "", company = "";
     try {
-      await page.waitForSelector("#experience", { timeout: 15000 });
       const result = await page.evaluate(() => {
-        const anchor = document.querySelector("#experience");
-        if (!anchor) return { jobTitle: "", company: "" };
-        let node = anchor.nextElementSibling;
-        while (node) {
-          const entity = node.querySelector('[data-view-name="profile-component-entity"]');
-          if (entity) {
-            const titleEl = entity.querySelector(".t-bold span[aria-hidden]");
-            const companyEl = entity.querySelector(".t-normal span[aria-hidden]");
-            let jobTitle = titleEl?.innerText?.trim() || "";
-            let company = companyEl?.innerText?.trim() || "";
-            if (company.includes("·")) company = company.split("·")[0].trim();
-            return { jobTitle, company };
-          }
-          node = node.nextElementSibling;
+        const items = Array.from(document.querySelectorAll("#experience li"));
+        for (const exp of items) {
+          const titleEl = exp.querySelector(".t-bold span[aria-hidden]");
+          const companyEl = exp.querySelector(".t-normal span[aria-hidden]");
+          const jobTitle = titleEl?.innerText?.trim() || "";
+          let company = companyEl?.innerText?.trim() || "";
+          if (company.includes("·")) company = company.split("·")[0].trim();
+          if (jobTitle && company) return { jobTitle, company };
         }
         return { jobTitle: "", company: "" };
       });
       jobTitle = result.jobTitle || "";
       company = result.company || "";
-      console.log(`💼 Experience found: ${jobTitle} at ${company}`);
-    } catch {
-      console.log("⚠️ Experience not found");
-    }
+    } catch {}
 
     return { firstName, lastName, profilePhoto, jobTitle, company };
   } catch (err) {
