@@ -119,32 +119,30 @@ export async function scrapeProfile(profileUrl) {
     console.log("🧭 Searching for experience section...");
     let jobTitle = "", company = "";
     try {
-      await page.waitForSelector('section[data-section="experience"], #experience', { timeout: 30000 });
-      await new Promise(r => setTimeout(r, 2000)); // give DOM time to render
-
-      const expResult = await page.evaluate(() => {
-        const section =
-          document.querySelector('section[data-section="experience"]') ||
-          document.querySelector("#experience");
-        if (!section) return { jobTitle: "", company: "" };
-
-        const firstItem = section.querySelector("li, div.pvs-entity");
-        if (!firstItem) return { jobTitle: "", company: "" };
-
-        const titleEl = firstItem.querySelector(".t-bold span[aria-hidden]");
-        const companyEl = firstItem.querySelector(".t-normal span[aria-hidden]");
-        const jobTitle = titleEl?.innerText?.trim() || "";
-        let company = companyEl?.innerText?.trim() || "";
-        if (company.includes("·")) company = company.split("·")[0].trim();
-        return { jobTitle, company };
+      await page.waitForSelector("#experience", { timeout: 15000 });
+      const result = await page.evaluate(() => {
+        const anchor = document.querySelector("#experience");
+        if (!anchor) return { jobTitle: "", company: "" };
+        let node = anchor.nextElementSibling;
+        while (node) {
+          const entity = node.querySelector('[data-view-name="profile-component-entity"]');
+          if (entity) {
+            const titleEl = entity.querySelector(".t-bold span[aria-hidden]");
+            const companyEl = entity.querySelector(".t-normal span[aria-hidden]");
+            let jobTitle = titleEl?.innerText?.trim() || "";
+            let company = companyEl?.innerText?.trim() || "";
+            if (company.includes("·")) company = company.split("·")[0].trim();
+            return { jobTitle, company };
+          }
+          node = node.nextElementSibling;
+        }
+        return { jobTitle: "", company: "" };
       });
-
-      jobTitle = expResult.jobTitle;
-      company = expResult.company;
-
+      jobTitle = result.jobTitle || "";
+      company = result.company || "";
       console.log(`💼 Experience found: ${jobTitle} at ${company}`);
-    } catch (err) {
-      console.log("⚠️ Experience not found:", err.message);
+    } catch {
+      console.log("⚠️ Experience not found");
     }
 
     resultData.jobTitle = jobTitle;
