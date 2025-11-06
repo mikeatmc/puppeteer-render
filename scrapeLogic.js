@@ -11,7 +11,7 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/** ✅ Helper to detect available Chrome binary */
+// Get Chromium binary path
 function getChromePath() {
   const candidates = [
     process.env.CHROME_PATH,
@@ -28,35 +28,27 @@ function getChromePath() {
     }
   }
 
-  console.warn("⚠️ No system Chromium found — Puppeteer will download one (slower start).");
+  console.warn("⚠️ No system Chromium found — Puppeteer will download one.");
   return undefined;
 }
 
-/** Safe navigation with retries */
+// Safe page navigation
 async function safeGoto(page, url, options = {}) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       console.log(`🌐 Navigating to ${url} (Attempt ${attempt})...`);
-      await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: 120000,
-        ...options,
-      });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000, ...options });
       return;
     } catch (err) {
       console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
-      if (attempt < maxAttempts) {
-        console.log("⏳ Retrying in 5 seconds...");
-        await new Promise((r) => setTimeout(r, 5000));
-      } else {
-        throw err;
-      }
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 5000));
+      else throw err;
     }
   }
 }
 
-/** Logs into LinkedIn and saves cookies */
+// Login and save cookies
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
   await safeGoto(page, "https://www.linkedin.com/login");
@@ -64,25 +56,23 @@ async function loginAndSaveCookies(page) {
   await page.type("#username", process.env.LINKEDIN_EMAIL, { delay: 50 });
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
-
   await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
   console.log("✅ Cookies saved successfully.");
   return cookies;
 }
 
-/** Ensures user is logged in */
+// Ensure logged in
 async function ensureLoggedIn(page, profileUrl) {
   let needLogin = false;
 
   if (fs.existsSync(cookiePath)) {
     try {
       const cookies = JSON.parse(fs.readFileSync(cookiePath));
-      if (cookies.length) {
-        await page.setCookie(...cookies);
-        console.log("🍪 Loaded saved cookies.");
-      } else needLogin = true;
+      if (cookies.length) await page.setCookie(...cookies);
+      else needLogin = true;
     } catch {
       needLogin = true;
     }
@@ -99,7 +89,7 @@ async function ensureLoggedIn(page, profileUrl) {
   }
 }
 
-/** Main scraper */
+// Main scraper
 export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
 
@@ -134,13 +124,11 @@ export async function scrapeProfile(profileUrl) {
     let profilePhoto = "";
     try {
       profilePhoto = await page.$eval(
-        `
-        img.pv-top-card-profile-picture__image--show,
-        img.pv-top-card-profile-picture__image,
-        img.profile-photo-edit__preview,
-        .pv-top-card img,
-        .pv-top-card__photo img
-      `,
+        `img.pv-top-card-profile-picture__image--show,
+         img.pv-top-card-profile-picture__image,
+         img.profile-photo-edit__preview,
+         .pv-top-card img,
+         .pv-top-card__photo img`,
         (el) => el.src
       );
     } catch {}
