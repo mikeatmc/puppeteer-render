@@ -94,8 +94,6 @@ export async function scrapeProfile(profileUrl) {
 
     await ensureLoggedIn(page, profileUrl);
     await autoScroll(page);
-    await new Promise(r => setTimeout(r, 4000)); // wait for lazy content
-
     // --- Name ---
     const fullName = await page.$eval("h1", el => el.innerText.trim()).catch(() => "");
     if (fullName) {
@@ -115,8 +113,7 @@ export async function scrapeProfile(profileUrl) {
     ).catch(() => "");
     resultData.profilePhoto = profilePhoto;
 
-    // --- Experience section (new + old layout support) ---
-    console.log("🧭 Searching for experience section...");
+    // First experience (jobTitle + company)
     let jobTitle = "", company = "";
     try {
       await page.waitForSelector("#experience", { timeout: 15000 });
@@ -140,7 +137,6 @@ export async function scrapeProfile(profileUrl) {
       });
       jobTitle = result.jobTitle || "";
       company = result.company || "";
-      console.log(`💼 Experience found: ${jobTitle} at ${company}`);
     } catch {
       console.log("⚠️ Experience not found");
     }
