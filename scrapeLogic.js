@@ -11,7 +11,7 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/** Safe navigation for LinkedIn pages with retries and detached frame handling */
+/** Safe navigation for LinkedIn with retries */
 async function safeGoto(page, url) {
   const maxAttempts = 3;
 
@@ -26,7 +26,7 @@ async function safeGoto(page, url) {
         console.log("⏳ Retrying with fresh page in 5 seconds...");
         await new Promise(r => setTimeout(r, 5000));
         try {
-          // close old page and create a new one to avoid detached frame
+          // Close old page to avoid detached frame
           const pages = await page.browser().pages();
           if (pages.includes(page)) await page.close();
           page = await page.browser().newPage();
@@ -81,7 +81,6 @@ async function ensureLoggedIn(page, profileUrl) {
   // Navigate to profile
   await safeGoto(page, profileUrl);
 
-  // Detect if login was successful
   const currentURL = page.url();
   const pageTitle = await page.title();
   console.log("📌 Current page URL:", currentURL);
@@ -99,12 +98,26 @@ async function ensureLoggedIn(page, profileUrl) {
     await safeGoto(page, profileUrl);
   }
 
-  // Wait for the profile content to load
-  try {
-    await page.waitForSelector('.pv-top-card', { timeout: 45000 });
-    console.log("✅ Profile page loaded successfully");
-  } catch {
-    throw new Error("Failed to load LinkedIn profile. Check credentials or cookies.");
+  // Robust profile card detection
+  const topCardSelectors = [
+    '.pv-top-card',
+    '.profile-topcard',
+    '.top-card-layout',
+    '.org-top-card'
+  ];
+
+  let topCardFound = false;
+  for (const sel of topCardSelectors) {
+    try {
+      await page.waitForSelector(sel, { timeout: 15000 });
+      topCardFound = true;
+      console.log(`✅ Profile card found with selector: ${sel}`);
+      break;
+    } catch {}
+  }
+
+  if (!topCardFound) {
+    throw new Error("Failed to load LinkedIn profile. DOM layout may have changed.");
   }
 }
 
@@ -133,33 +146,40 @@ export async function scrapeProfile(profileUrl) {
     await page.setDefaultNavigationTimeout(180000);
     await page.setViewport({ width: 1366, height: 768 });
 
-    // Ensure login and profile accessibility
     await ensureLoggedIn(page, profileUrl);
 
     /** --- Scrape full name --- */
     let firstName = "", lastName = "", fullName = "";
-    try {
-      await page.waitForSelector("h1", { timeout: 15000 });
-      fullName = await page.$eval("h1", el => el.innerText.trim());
-      [firstName, ...lastNameParts] = fullName.split(" ");
-      lastName = lastNameParts.join(" ");
-      console.log(`👤 Name found: ${fullName}`);
-    } catch {
-      console.log("⚠️ Name not found");
+    const nameSelectors = ["h1", ".text-heading-xlarge", ".profile-topcard__name"];
+    for (const sel of nameSelectors) {
+      try {
+        await page.waitForSelector(sel, { timeout: 10000 });
+        fullName = await page.$eval(sel, el => el.innerText.trim());
+        [firstName, ...lastNameParts] = fullName.split(" ");
+        lastName = lastNameParts.join(" ");
+        console.log(`👤 Name found: ${fullName} (selector: ${sel})`);
+        break;
+      } catch {}
     }
+    if (!fullName) console.log("⚠️ Name not found");
 
     /** --- Scrape profile photo --- */
     let profilePhoto = "";
-    try {
-      await page.waitForSelector("img.pv-top-card-profile-picture__image, .pv-top-card img", { timeout: 10000 });
-      profilePhoto = await page.$eval(
-        "img.pv-top-card-profile-picture__image, .pv-top-card img",
-        el => el.src
-      );
-      console.log(`🖼 Profile photo found: ${profilePhoto}`);
-    } catch {
-      console.log("⚠️ Profile photo not found");
+    const photoSelectors = [
+      "img.pv-top-card-profile-picture__image",
+      ".pv-top-card img",
+      ".profile-photo-edit__preview"
+    ];
+    for (const sel of photoSelectors) {
+      try {
+        profilePhoto = await page.$eval(sel, el => el.src);
+        if (profilePhoto) {
+          console.log(`🖼 Profile photo found (selector: ${sel}): ${profilePhoto}`);
+          break;
+        }
+      } catch {}
     }
+    if (!profilePhoto) console.log("⚠️ Profile photo not found");
 
     /** --- Scrape first experience --- */
     let jobTitle = "", company = "";
@@ -192,6 +212,7 @@ export async function scrapeProfile(profileUrl) {
 
     console.log("✅ Scrape completed successfully.");
     return { firstName, lastName, fullName, profilePhoto, jobTitle, company };
+
   } catch (err) {
     console.error("❌ Scrape failed:", err);
     return { error: err.message };
