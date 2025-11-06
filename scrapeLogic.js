@@ -107,7 +107,6 @@ async function autoScroll(page) {
 /** Main scraper */
 export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
-  console.log(`🚀 Scraping LinkedIn profile: ${profileUrl}`);
 
   const browser = await puppeteerExtra.launch({
     headless: true,
@@ -129,14 +128,14 @@ export async function scrapeProfile(profileUrl) {
     await page.setViewport({ width: 1366, height: 768 });
 
     await ensureLoggedIn(page, profileUrl);
-    await autoScroll(page); // load lazy content
+    await autoScroll(page);
 
-    /** --- Full name --- */
+    // Name
     const fullName = await page.$eval("h1", el => el.innerText.trim()).catch(() => "");
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    /** --- Profile photo --- */
+    // Profile photo
     const profilePhoto = await page.$eval(
       `img.pv-top-card-profile-picture__image--show,
        img.pv-top-card-profile-picture__image,
@@ -146,25 +145,27 @@ export async function scrapeProfile(profileUrl) {
       el => el.src || el.getAttribute("data-delayed-url") || el.getAttribute("data-src")
     ).catch(() => "");
 
-    /** --- First experience --- */
+    // First experience (jobTitle + company)
     let jobTitle = "", company = "";
     try {
       await page.waitForSelector("#experience", { timeout: 20000 });
       const result = await page.evaluate(() => {
-        const expNode = document.querySelector("#experience li");
-        const titleEl = expNode?.querySelector(".t-bold span[aria-hidden]");
-        const companyEl = expNode?.querySelector(".t-normal span[aria-hidden]");
-        let jobTitle = titleEl?.innerText?.trim() || "";
-        let company = companyEl?.innerText?.trim() || "";
-        if (company.includes("·")) company = company.split("·")[0].trim();
-        return { jobTitle, company };
+        const items = Array.from(document.querySelectorAll("#experience li"));
+        for (const exp of items) {
+          const titleEl = exp.querySelector(".t-bold span[aria-hidden]");
+          const companyEl = exp.querySelector(".t-normal span[aria-hidden]");
+          const jobTitle = titleEl?.innerText?.trim() || "";
+          let company = companyEl?.innerText?.trim() || "";
+          if (company.includes("·")) company = company.split("·")[0].trim();
+          if (jobTitle && company) return { jobTitle, company };
+        }
+        return { jobTitle: "", company: "" };
       });
       jobTitle = result.jobTitle || "";
       company = result.company || "";
     } catch {}
 
-    console.log("✅ Scrape completed successfully.");
-    return { firstName, lastName, fullName, profilePhoto, jobTitle, company };
+    return { firstName, lastName, profilePhoto, jobTitle, company };
   } catch (err) {
     console.error("❌ Scrape failed:", err);
     return { error: err.message };
