@@ -11,18 +11,29 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/** Helper: safe navigation with retries */
-async function safeGoto(page, url, options = {}) {
+/** Safe navigation for LinkedIn pages with retries and detached frame handling */
+async function safeGoto(page, url) {
   const maxAttempts = 3;
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       console.log(`🌐 Navigating to ${url} (Attempt ${attempt})...`);
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 120000, ...options });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
       return;
     } catch (err) {
       console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
-      if (attempt < maxAttempts) await new Promise(r => setTimeout(r, 5000));
-      else throw err;
+      if (attempt < maxAttempts) {
+        console.log("⏳ Retrying with fresh page in 5 seconds...");
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          // close old page and create a new one to avoid detached frame
+          const pages = await page.browser().pages();
+          if (pages.includes(page)) await page.close();
+          page = await page.browser().newPage();
+        } catch {}
+      } else {
+        throw err;
+      }
     }
   }
 }
@@ -36,7 +47,7 @@ async function loginAndSaveCookies(page) {
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
 
-  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }).catch(() => {});
+  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
 
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
@@ -49,7 +60,7 @@ async function loginAndSaveCookies(page) {
 async function ensureLoggedIn(page, profileUrl) {
   let needLogin = true;
 
-  // Load existing cookies if available
+  // Load cookies if available
   if (fs.existsSync(cookiePath)) {
     try {
       const cookies = JSON.parse(fs.readFileSync(cookiePath));
@@ -70,7 +81,7 @@ async function ensureLoggedIn(page, profileUrl) {
   // Navigate to profile
   await safeGoto(page, profileUrl);
 
-  // Check for login or checkpoint page
+  // Detect if login was successful
   const currentURL = page.url();
   const pageTitle = await page.title();
   console.log("📌 Current page URL:", currentURL);
@@ -88,9 +99,9 @@ async function ensureLoggedIn(page, profileUrl) {
     await safeGoto(page, profileUrl);
   }
 
-  // Wait for actual profile page content
+  // Wait for the profile content to load
   try {
-    await page.waitForSelector('.pv-top-card', { timeout: 30000 });
+    await page.waitForSelector('.pv-top-card', { timeout: 45000 });
     console.log("✅ Profile page loaded successfully");
   } catch {
     throw new Error("Failed to load LinkedIn profile. Check credentials or cookies.");
@@ -113,11 +124,12 @@ export async function scrapeProfile(profileUrl) {
       "--no-zygote",
       "--disable-extensions",
       "--single-process",
+      "--window-size=1920,1080",
     ],
   });
 
   try {
-    const page = await browser.newPage();
+    let page = await browser.newPage();
     await page.setDefaultNavigationTimeout(180000);
     await page.setViewport({ width: 1366, height: 768 });
 
