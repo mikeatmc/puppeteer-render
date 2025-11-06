@@ -120,7 +120,7 @@ export async function scrapeProfile(profileUrl) {
 
     await ensureLoggedIn(page, profileUrl);
     await autoScroll(page);
-    await page.waitForTimeout(3000); // wait for lazy-loaded content
+    await new Promise(r => setTimeout(r, 3000));
 
     // --- Name ---
     const nameSelectors = ["h1.text-heading-xlarge", "h1", ".pv-top-card--list li.inline.t-24.t-black.t-normal.break-words"];
