@@ -11,13 +11,13 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-// Safe page navigation
+/** Safe page navigation with retries */
 async function safeGoto(page, url, options = {}) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       console.log(`🌐 Navigating to ${url} (Attempt ${attempt})...`);
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000, ...options });
+      await page.goto(url, { waitUntil: "networkidle2", timeout: 120000, ...options });
       return;
     } catch (err) {
       console.log(`⚠️ Attempt ${attempt} failed: ${err.message}`);
@@ -27,7 +27,7 @@ async function safeGoto(page, url, options = {}) {
   }
 }
 
-// Login and save cookies
+/** Login and save cookies */
 async function loginAndSaveCookies(page) {
   console.log("🔐 Logging into LinkedIn...");
   await safeGoto(page, "https://www.linkedin.com/login");
@@ -35,7 +35,8 @@ async function loginAndSaveCookies(page) {
   await page.type("#username", process.env.LINKEDIN_EMAIL, { delay: 50 });
   await page.type("#password", process.env.LINKEDIN_PASSWORD, { delay: 50 });
   await page.click('button[type="submit"]');
-  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+
+  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }).catch(() => {});
 
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
@@ -43,7 +44,7 @@ async function loginAndSaveCookies(page) {
   return cookies;
 }
 
-// Ensure logged in
+/** Ensure logged in */
 async function ensureLoggedIn(page, profileUrl) {
   let needLogin = false;
 
@@ -68,12 +69,12 @@ async function ensureLoggedIn(page, profileUrl) {
   }
 }
 
-// Main scraper
+/** Main scraper */
 export async function scrapeProfile(profileUrl) {
   if (!profileUrl) throw new Error("No profile URL provided");
 
-  console.log("🚀 Launching Chromium...");
-  
+  console.log(`🚀 Scraping LinkedIn profile: ${profileUrl}`);
+
   const browser = await puppeteerExtra.launch({
     headless: true,
     args: [
@@ -94,48 +95,55 @@ export async function scrapeProfile(profileUrl) {
 
     await ensureLoggedIn(page, profileUrl);
 
-    const fullName = await page.$eval("h1", (el) => el.innerText.trim()).catch(() => "");
+    /** --- Scrape full name --- */
+    await page.waitForSelector("h1", { timeout: 15000 });
+    const fullName = await page.$eval("h1", (el) => el.innerText.trim());
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
+    console.log(`👤 Name found: ${fullName}`);
 
+    /** --- Scrape profile photo --- */
     let profilePhoto = "";
     try {
+      await page.waitForSelector("img.pv-top-card-profile-picture__image, .pv-top-card img", { timeout: 10000 });
       profilePhoto = await page.$eval(
-        `img.pv-top-card-profile-picture__image--show,
-         img.pv-top-card-profile-picture__image,
-         img.profile-photo-edit__preview,
-         .pv-top-card img,
-         .pv-top-card__photo img`,
+        "img.pv-top-card-profile-picture__image, .pv-top-card img",
         (el) => el.src
       );
-    } catch {}
+      console.log(`🖼 Profile photo found: ${profilePhoto}`);
+    } catch {
+      console.log("⚠️ Profile photo not found");
+    }
 
+    /** --- Scrape first experience --- */
     let jobTitle = "",
       company = "";
     try {
       await page.waitForSelector("#experience", { timeout: 15000 });
       const result = await page.evaluate(() => {
         const anchor = document.querySelector("#experience");
-        let node = anchor?.parentElement;
-        let jobTitle = "",
-          company = "";
-        while (node && !jobTitle && !company) {
+        if (!anchor) return { jobTitle: "", company: "" };
+        let node = anchor.nextElementSibling;
+        while (node) {
           const entity = node.querySelector('[data-view-name="profile-component-entity"]');
           if (entity) {
             const titleEl = entity.querySelector(".t-bold span[aria-hidden]");
             const companyEl = entity.querySelector(".t-normal span[aria-hidden]");
-            jobTitle = titleEl?.innerText?.trim() || "";
-            company = companyEl?.innerText?.trim() || "";
+            let jobTitle = titleEl?.innerText?.trim() || "";
+            let company = companyEl?.innerText?.trim() || "";
             if (company.includes("·")) company = company.split("·")[0].trim();
-            break;
+            return { jobTitle, company };
           }
           node = node.nextElementSibling;
         }
-        return { jobTitle, company };
+        return { jobTitle: "", company: "" };
       });
       jobTitle = result.jobTitle || "";
       company = result.company || "";
-    } catch {}
+      console.log(`💼 Experience found: ${jobTitle} at ${company}`);
+    } catch {
+      console.log("⚠️ Experience not found");
+    }
 
     console.log("✅ Scrape completed successfully.");
     return { firstName, lastName, profilePhoto, jobTitle, company };
