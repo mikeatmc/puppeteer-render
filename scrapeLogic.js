@@ -11,7 +11,7 @@ const cookiePath = path.join(__dirname, "cookies.json");
 
 puppeteerExtra.use(StealthPlugin());
 
-/** Safe page navigation with retries */
+/** Safe navigation with retries */
 async function safeGoto(page, url, options = {}) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -41,32 +41,45 @@ async function loginAndSaveCookies(page) {
   const cookies = await page.cookies();
   fs.writeFileSync(cookiePath, JSON.stringify(cookies, null, 2));
   console.log("✅ Cookies saved successfully.");
+
   return cookies;
 }
 
-/** Ensure logged in */
+/** Ensure logged in and profile accessible */
 async function ensureLoggedIn(page, profileUrl) {
-  let needLogin = false;
+  let needLogin = true;
 
   if (fs.existsSync(cookiePath)) {
     try {
       const cookies = JSON.parse(fs.readFileSync(cookiePath));
-      if (cookies.length) await page.setCookie(...cookies);
-      else needLogin = true;
+      if (cookies.length) {
+        await page.setCookie(...cookies);
+        needLogin = false;
+        console.log("🍪 Loaded saved cookies");
+      }
     } catch {
       needLogin = true;
     }
-  } else needLogin = true;
+  }
 
-  if (needLogin) await loginAndSaveCookies(page);
+  if (needLogin) {
+    await loginAndSaveCookies(page);
+  }
 
+  // Navigate to profile page
   await safeGoto(page, profileUrl);
-  if (page.url().includes("/login")) {
-    console.log("⚠️ Cookies expired, re-logging...");
+
+  // If redirected to login or landing page, force login
+  if (page.url().includes("/login") || page.url().includes("guest")) {
+    console.log("⚠️ Not logged in or cookies expired, logging in...");
     const cookies = await loginAndSaveCookies(page);
     await page.setCookie(...cookies);
     await safeGoto(page, profileUrl);
   }
+
+  // Wait for profile content
+  await page.waitForSelector('.pv-top-card', { timeout: 15000 });
+  console.log("✅ Profile page loaded successfully");
 }
 
 /** Main scraper */
@@ -93,14 +106,20 @@ export async function scrapeProfile(profileUrl) {
     await page.setDefaultNavigationTimeout(180000);
     await page.setViewport({ width: 1366, height: 768 });
 
+    // Ensure logged in and profile accessible
     await ensureLoggedIn(page, profileUrl);
 
     /** --- Scrape full name --- */
-    await page.waitForSelector("h1", { timeout: 15000 });
-    const fullName = await page.$eval("h1", (el) => el.innerText.trim());
-    const [firstName, ...lastNameParts] = fullName.split(" ");
-    const lastName = lastNameParts.join(" ");
-    console.log(`👤 Name found: ${fullName}`);
+    let firstName = "", lastName = "", fullName = "";
+    try {
+      await page.waitForSelector("h1", { timeout: 15000 });
+      fullName = await page.$eval("h1", el => el.innerText.trim());
+      [firstName, ...lastNameParts] = fullName.split(" ");
+      lastName = lastNameParts.join(" ");
+      console.log(`👤 Name found: ${fullName}`);
+    } catch {
+      console.log("⚠️ Name not found");
+    }
 
     /** --- Scrape profile photo --- */
     let profilePhoto = "";
@@ -108,7 +127,7 @@ export async function scrapeProfile(profileUrl) {
       await page.waitForSelector("img.pv-top-card-profile-picture__image, .pv-top-card img", { timeout: 10000 });
       profilePhoto = await page.$eval(
         "img.pv-top-card-profile-picture__image, .pv-top-card img",
-        (el) => el.src
+        el => el.src
       );
       console.log(`🖼 Profile photo found: ${profilePhoto}`);
     } catch {
@@ -116,8 +135,7 @@ export async function scrapeProfile(profileUrl) {
     }
 
     /** --- Scrape first experience --- */
-    let jobTitle = "",
-      company = "";
+    let jobTitle = "", company = "";
     try {
       await page.waitForSelector("#experience", { timeout: 15000 });
       const result = await page.evaluate(() => {
@@ -146,7 +164,7 @@ export async function scrapeProfile(profileUrl) {
     }
 
     console.log("✅ Scrape completed successfully.");
-    return { firstName, lastName, profilePhoto, jobTitle, company };
+    return { firstName, lastName, fullName, profilePhoto, jobTitle, company };
   } catch (err) {
     console.error("❌ Scrape failed:", err);
     return { error: err.message };
