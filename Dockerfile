@@ -18,6 +18,8 @@ RUN chown -R pptruser:pptruser /usr/src/app
 
 # Switch to Puppeteer user
 USER pptruser
+RUN mkdir -p /home/pptruser/.cache/puppeteer && \
+    npx puppeteer browsers install chrome --path=/home/pptruser/.cache/puppeteer
 
 # Expose port
 EXPOSE 4000
