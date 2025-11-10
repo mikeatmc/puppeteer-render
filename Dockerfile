@@ -10,9 +10,6 @@ COPY package*.json ./
 USER root
 RUN npm install --production --no-audit --no-fund
 
-# Ensure Puppeteer installs the right Chromium version
-RUN npx puppeteer browsers install chrome
-
 # Copy the rest of the app
 COPY . .
 
