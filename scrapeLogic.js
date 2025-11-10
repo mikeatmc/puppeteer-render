@@ -139,49 +139,76 @@ export async function scrapeProfile(profileUrl) {
     await page.setViewport({ width: 1366, height: 768 });
 
     await ensureLoggedIn(page, profileUrl);
-    await autoScroll(page);
 
-    // Name
-    const fullName = await page.$eval("h1", el => el.innerText.trim()).catch(() => "");
+    // Scroll and wait for LinkedIn to load dynamic sections
+    await autoScroll(page);
+    await new Promise(r => setTimeout(r, 4000));
+
+    // 🧠 Extract name (robust)
+    const fullName = await page.evaluate(() => {
+      const selectors = [
+        "h1",
+        ".pv-text-details__left-panel h1",
+        '[data-view-name="identity-profile-name"] span[dir="auto"]',
+      ];
+      for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el && el.innerText) return el.innerText.trim();
+      }
+      return "";
+    });
+
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    // Profile photo
-    const profilePhoto = await page.$eval(
-      `img.pv-top-card-profile-picture__image--show,
-       img.pv-top-card-profile-picture__image,
-       img.profile-photo-edit__preview,
-       .pv-top-card img,
-       .pv-top-card__photo img`,
-      el => el.src || el.getAttribute("data-delayed-url") || el.getAttribute("data-src")
-    ).catch(() => "");
+    // 🧠 Extract profile photo
+    const profilePhoto = await page.evaluate(() => {
+      const img = document.querySelector(`
+        img.pv-top-card-profile-picture__image--show,
+        img.pv-top-card-profile-picture__image,
+        img.profile-photo-edit__preview,
+        .pv-top-card__photo img,
+        img[alt*='profile picture'],
+        .pv-top-card img
+      `);
+      return (
+        img?.src ||
+        img?.getAttribute("data-delayed-url") ||
+        img?.getAttribute("data-src") ||
+        ""
+      );
+    });
 
-    // First experience (jobTitle + company)
-    let jobTitle = "",
-      company = "";
+    // 🧠 Extract experience
+    let jobTitle = "", company = "";
     try {
-      await page.waitForSelector("#experience", { timeout: 15000 });
-      const result = await page.evaluate(() => {
-        const anchor = document.querySelector("#experience");
-        if (!anchor) return { jobTitle: "", company: "" };
-        let node = anchor.nextElementSibling;
-        while (node) {
-          const entity = node.querySelector('[data-view-name="profile-component-entity"]');
-          if (entity) {
-            const titleEl = entity.querySelector(".t-bold span[aria-hidden]");
-            const companyEl = entity.querySelector(".t-normal span[aria-hidden]");
-            let jobTitle = titleEl?.innerText?.trim() || "";
-            let company = companyEl?.innerText?.trim() || "";
-            if (company.includes("·")) company = company.split("·")[0].trim();
-            return { jobTitle, company };
+      await page.waitForTimeout(3000);
+      const exp = await page.evaluate(() => {
+        const selectors = [
+          ".pvs-list__outer-container li",
+          "[data-view-name='profile-component-entity']",
+          ".pv-entity__summary-info",
+          ".experience-item",
+        ];
+        for (const sel of selectors) {
+          const el = document.querySelector(sel);
+          if (el) {
+            const title =
+              el.querySelector(".t-bold span[aria-hidden]") ||
+              el.querySelector("span[dir='auto']");
+            const companyEl =
+              el.querySelector(".t-normal span[aria-hidden]") ||
+              el.querySelector(".t-14.t-normal");
+            let job = title?.innerText?.trim() || "";
+            let comp = companyEl?.innerText?.trim() || "";
+            if (comp.includes("·")) comp = comp.split("·")[0].trim();
+            return { jobTitle: job, company: comp };
           }
-          node = node.nextElementSibling;
         }
         return { jobTitle: "", company: "" };
       });
-      jobTitle = result.jobTitle || "";
-      company = result.company || "";
-      console.log(`💼 Experience found: ${jobTitle} at ${company}`);
+      jobTitle = exp.jobTitle;
+      company = exp.company;
     } catch {
       console.log("⚠️ Experience not found");
     }
@@ -197,3 +224,4 @@ export async function scrapeProfile(profileUrl) {
     await browser.close().catch(() => {});
   }
 }
+
