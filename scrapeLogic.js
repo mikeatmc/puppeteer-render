@@ -182,7 +182,6 @@ export async function scrapeProfile(profileUrl) {
     // 🧠 Extract experience
     let jobTitle = "", company = "";
     try {
-      await page.waitForTimeout(3000);
       const exp = await page.evaluate(() => {
         const selectors = [
           ".pvs-list__outer-container li",
@@ -209,8 +208,9 @@ export async function scrapeProfile(profileUrl) {
       });
       jobTitle = exp.jobTitle;
       company = exp.company;
-    } catch {
-      console.log("⚠️ Experience not found");
+      console.log("✅ Experience found: ${jobTitle} at ${company}");
+    } catch (err) {
+      console.log("⚠️ Experience not found:", err.message);
     }
 
     return {
