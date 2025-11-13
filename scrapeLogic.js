@@ -208,7 +208,7 @@ export async function scrapeProfile(profileUrl) {
       });
       jobTitle = exp.jobTitle;
       company = exp.company;
-      console.log("✅ Experience found: ${jobTitle} at ${company}");
+      console.log(`✅ Experience found: ${jobTitle} at ${company}`);
     } catch (err) {
       console.log("⚠️ Experience not found:", err.message);
     }
