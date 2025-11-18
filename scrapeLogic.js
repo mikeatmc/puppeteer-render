@@ -162,7 +162,7 @@ export async function scrapeProfile(profileUrl) {
     const lastName = lastNameParts.join(" ");
 
     // 🧠 Extract profile photo
-    const profilePhoto = await page.evaluate(() => {
+    let profilePhoto = await page.evaluate(() => {
       try {
         const script = document.querySelector('script[type="application/ld+json"]');
         if (script) {
