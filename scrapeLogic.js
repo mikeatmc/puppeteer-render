@@ -104,6 +104,68 @@ async function autoScroll(page) {
   });
 }
 
+/** 🧠 HD PROFILE PHOTO EXTRACTOR (FINAL VERSION) */
+async function getBestProfilePhoto(page) {
+  // 1️⃣ Get raw URL including ?e=...&t=...
+  let rawUrl = await page.evaluate(() => {
+    try {
+      // Prefer JSON-LD (most reliable)
+      const script = document.querySelector('script[type="application/ld+json"]');
+      if (script) {
+        const json = JSON.parse(script.textContent);
+        if (json && json.image) return json.image;
+      }
+    } catch {}
+
+    const img = document.querySelector(`
+      img.pv-top-card-profile-picture__image--show,
+      img.pv-top-card-profile-picture__image,
+      img.profile-photo-edit__preview,
+      .pv-top-card__photo img,
+      img[alt*='profile picture'],
+      .pv-top-card img
+    `);
+
+    return (
+      img?.src ||
+      img?.getAttribute("data-delayed-url") ||
+      img?.getAttribute("data-src") ||
+      ""
+    );
+  });
+
+  if (!rawUrl) return "";
+
+  // Keep original query parameters
+  const [baseUrl, params] = rawUrl.split("?");
+
+  // Replace only the shrink_XXX_XXX part
+  function build(size) {
+    return baseUrl.replace(/shrink_\d+_\d+/g, `shrink_${size}_${size}`) + (params ? `?${params}` : "");
+  }
+
+  const url800 = build(800);
+  const url400 = build(400);
+  const url200 = build(200);
+
+  async function test(url) {
+    return await page.evaluate(async (u) => {
+      try {
+        const r = await fetch(u, { method: "HEAD" });
+        return r.ok;
+      } catch {
+        return false;
+      }
+    }, url);
+  }
+
+  if (await test(url800)) return url800;
+  if (await test(url400)) return url400;
+  if (await test(url200)) return url200;
+
+  return rawUrl; // fallback
+}
+
 /** Main scraper */
 export async function scrapeProfile(profileUrl) {
   const defaultResponse = {
@@ -140,11 +202,10 @@ export async function scrapeProfile(profileUrl) {
 
     await ensureLoggedIn(page, profileUrl);
 
-    // Scroll and wait for LinkedIn to load dynamic sections
     await autoScroll(page);
     await new Promise(r => setTimeout(r, 4000));
 
-    // 🧠 Extract name (robust)
+    // 🧠 Extract name
     const fullName = await page.evaluate(() => {
       const selectors = [
         "h1",
@@ -161,70 +222,10 @@ export async function scrapeProfile(profileUrl) {
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    // 🧠 Extract profile photo
-    /** Get highest possible HD profile photo */
-    async function getBestProfilePhoto(page) {
-      // extract base URL first
-      let rawUrl = await page.evaluate(() => {
-        try {
-          // 1) Prefer LinkedIn JSON-LD (gives highest quality)
-          const script = document.querySelector('script[type="application/ld+json"]');
-          if (script) {
-            const data = JSON.parse(script.textContent);
-            if (data && data.image) return data.image;
-          }
-        } catch {}
-    
-        // 2) Fallback to DOM sources
-        const img = document.querySelector(`
-          img.pv-top-card-profile-picture__image--show,
-          img.pv-top-card-profile-picture__image,
-          img.profile-photo-edit__preview,
-          .pv-top-card__photo img,
-          img[alt*='profile picture'],
-          .pv-top-card img
-        `);
-    
-        return (
-          img?.src ||
-          img?.getAttribute("data-delayed-url") ||
-          img?.getAttribute("data-src") ||
-          ""
-        );
-      });
-    
-      if (!rawUrl) return "";
-    
-      // Normalize URL to remove weird suffixes
-      rawUrl = rawUrl.split("?")[0];
-    
-      // Build HD URLs
-      const url400 = rawUrl.replace(/shrink_\d+_\d+/g, "shrink_400_400");
-      const url800 = rawUrl.replace(/shrink_\d+_\d+/g, "shrink_800_800");
-    
-      // 👇 Head request via page context to test availability
-      async function check(url) {
-        return await page.evaluate(async (u) => {
-          try {
-            const res = await fetch(u, { method: "HEAD" });
-            return res.ok;
-          } catch {
-            return false;
-          }
-        }, url);
-      }
-    
-      // Try 800
-      if (await check(url800)) return url800;
-    
-      // Try 400
-      if (await check(url400)) return url400;
-    
-      // fallback (200x200 usually)
-      return rawUrl;
-    }
+    // 🧠 HD profile photo
     const profilePhoto = await getBestProfilePhoto(page);
-    // 🧠 Extract experience
+
+    // 🧠 Experience
     let jobTitle = "", company = "";
     try {
       const exp = await page.evaluate(() => {
@@ -253,15 +254,13 @@ export async function scrapeProfile(profileUrl) {
       });
       jobTitle = exp.jobTitle;
       company = exp.company;
-      console.log(`✅ Experience found: ${jobTitle} at ${company}`);
-    } catch (err) {
-      console.log("⚠️ Experience not found:", err.message);
-    }
+    } catch {}
 
     return {
       status: "success",
       data: { firstName, lastName, profilePhoto, jobTitle, company },
     };
+
   } catch (err) {
     console.error("❌ Scrape failed:", err);
     return defaultResponse;
@@ -269,4 +268,3 @@ export async function scrapeProfile(profileUrl) {
     await browser.close().catch(() => {});
   }
 }
-
