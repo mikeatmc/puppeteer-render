@@ -162,35 +162,68 @@ export async function scrapeProfile(profileUrl) {
     const lastName = lastNameParts.join(" ");
 
     // 🧠 Extract profile photo
-    let profilePhoto = await page.evaluate(() => {
-      try {
-        const script = document.querySelector('script[type="application/ld+json"]');
-        if (script) {
-          const data = JSON.parse(script.textContent);
-          if (data && data.image) {
-            return data.image; // already full HD (usually 400–800px)
+    /** Get highest possible HD profile photo */
+    async function getBestProfilePhoto(page) {
+      // extract base URL first
+      let rawUrl = await page.evaluate(() => {
+        try {
+          // 1) Prefer LinkedIn JSON-LD (gives highest quality)
+          const script = document.querySelector('script[type="application/ld+json"]');
+          if (script) {
+            const data = JSON.parse(script.textContent);
+            if (data && data.image) return data.image;
           }
-        }
-      } catch (e) {}
-      const img = document.querySelector(`
-        img.pv-top-card-profile-picture__image--show,
-        img.pv-top-card-profile-picture__image,
-        img.profile-photo-edit__preview,
-        .pv-top-card__photo img,
-        img[alt*='profile picture'],
-        .pv-top-card img
-      `);
-      return (
-        img?.src ||
-        img?.getAttribute("data-delayed-url") ||
-        img?.getAttribute("data-src") ||
-        ""
-      );
-    });
-
-    if (profilePhoto) {
-      profilePhoto = profilePhoto.replace(/shrink_\d+_\d+/g, "shrink_800_800");
+        } catch {}
+    
+        // 2) Fallback to DOM sources
+        const img = document.querySelector(`
+          img.pv-top-card-profile-picture__image--show,
+          img.pv-top-card-profile-picture__image,
+          img.profile-photo-edit__preview,
+          .pv-top-card__photo img,
+          img[alt*='profile picture'],
+          .pv-top-card img
+        `);
+    
+        return (
+          img?.src ||
+          img?.getAttribute("data-delayed-url") ||
+          img?.getAttribute("data-src") ||
+          ""
+        );
+      });
+    
+      if (!rawUrl) return "";
+    
+      // Normalize URL to remove weird suffixes
+      rawUrl = rawUrl.split("?")[0];
+    
+      // Build HD URLs
+      const url400 = rawUrl.replace(/shrink_\d+_\d+/g, "shrink_400_400");
+      const url800 = rawUrl.replace(/shrink_\d+_\d+/g, "shrink_800_800");
+    
+      // 👇 Head request via page context to test availability
+      async function check(url) {
+        return await page.evaluate(async (u) => {
+          try {
+            const res = await fetch(u, { method: "HEAD" });
+            return res.ok;
+          } catch {
+            return false;
+          }
+        }, url);
+      }
+    
+      // Try 800
+      if (await check(url800)) return url800;
+    
+      // Try 400
+      if (await check(url400)) return url400;
+    
+      // fallback (200x200 usually)
+      return rawUrl;
     }
+    const profilePhoto = await getBestProfilePhoto(page);
     // 🧠 Extract experience
     let jobTitle = "", company = "";
     try {
