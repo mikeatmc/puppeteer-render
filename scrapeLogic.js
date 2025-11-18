@@ -104,105 +104,6 @@ async function autoScroll(page) {
   });
 }
 
-/** 🧠 ULTIMATE HD PROFILE PHOTO MODULE */
-async function getBestProfilePhoto(page) {
-  // Extract image URL from page (JSON-LD preferred)
-  let rawUrl = await page.evaluate(() => {
-    try {
-      const script = document.querySelector('script[type="application/ld+json"]');
-      if (script) {
-        const data = JSON.parse(script.textContent);
-        if (data?.image) return data.image;
-      }
-    } catch {}
-
-    const img = document.querySelector(`
-      img.pv-top-card-profile-picture__image--show,
-      img.pv-top-card-profile-picture__image,
-      img.profile-photo-edit__preview,
-      .pv-top-card__photo img,
-      img[alt*='profile picture'],
-      .pv-top-card img
-    `);
-
-    return (
-      img?.src ||
-      img?.getAttribute("data-delayed-url") ||
-      img?.getAttribute("data-src") ||
-      ""
-    );
-  });
-
-  if (!rawUrl) return "";
-
-  const [baseUrl, params] = rawUrl.split("?");
-
-  const build = size =>
-    baseUrl.replace(/shrink_\d+_\d+/g, `shrink_${size}_${size}`) +
-    (params ? `?${params}` : "");
-
-  const img800 = build(800);
-  const img400 = build(400);
-  const img200 = build(200);
-
-  // Validate LinkedIn image response
-  async function validate(url) {
-    return await page.evaluate(async u => {
-      try {
-        const r = await fetch(u, { method: "GET" });
-        if (!r.ok) return false;
-
-        const blob = await r.blob();
-        // 200x200 images are ~8–12 KB → reject them
-        if (blob.size < 15000) return false;
-
-        return true;
-      } catch {
-        return false;
-      }
-    }, url);
-  }
-
-  // Try 800 first
-  if (await validate(img800)) return img800;
-
-  // Try 400
-  if (await validate(img400)) return img400;
-
-  // Try 200 (last chance)
-  if (await validate(img200)) return img200;
-
-  // 🚨 If all CDN attempts fail → take HD screenshot
-  const screenshot = await takeProfilePhotoScreenshot(page);
-  return screenshot || rawUrl;
-}
-
-/** 📸 HD SCREENSHOT FALLBACK */
-async function takeProfilePhotoScreenshot(page) {
-  try {
-    const selector = `
-      img.pv-top-card-profile-picture__image--show,
-      img.pv-top-card-profile-picture__image,
-      .pv-top-card__photo img
-    `;
-
-    const img = await page.$(selector);
-    if (!img) return "";
-
-    await page.setViewport({
-      width: 1500,
-      height: 1200,
-      deviceScaleFactor: 2,
-    });
-
-    const buffer = await img.screenshot({ type: "jpeg", quality: 90 });
-    return "data:image/jpeg;base64," + buffer.toString("base64");
-  } catch (err) {
-    console.log("⚠️ Screenshot fallback failed:", err.message);
-    return "";
-  }
-}
-
 /** Main scraper */
 export async function scrapeProfile(profileUrl) {
   const defaultResponse = {
@@ -239,10 +140,11 @@ export async function scrapeProfile(profileUrl) {
 
     await ensureLoggedIn(page, profileUrl);
 
+    // Scroll and wait for LinkedIn to load dynamic sections
     await autoScroll(page);
     await new Promise(r => setTimeout(r, 4000));
 
-    // 🧠 Extract name
+    // 🧠 Extract name (robust)
     const fullName = await page.evaluate(() => {
       const selectors = [
         "h1",
@@ -259,10 +161,25 @@ export async function scrapeProfile(profileUrl) {
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    // 🧠 HD profile photo
-    const profilePhoto = await getBestProfilePhoto(page);
+    // 🧠 Extract profile photo
+    const profilePhoto = await page.evaluate(() => {
+      const img = document.querySelector(`
+        img.pv-top-card-profile-picture__image--show,
+        img.pv-top-card-profile-picture__image,
+        img.profile-photo-edit__preview,
+        .pv-top-card__photo img,
+        img[alt*='profile picture'],
+        .pv-top-card img
+      `);
+      return (
+        img?.src ||
+        img?.getAttribute("data-delayed-url") ||
+        img?.getAttribute("data-src") ||
+        ""
+      );
+    });
 
-    // 🧠 Experience
+    // 🧠 Extract experience
     let jobTitle = "", company = "";
     try {
       const exp = await page.evaluate(() => {
@@ -291,13 +208,15 @@ export async function scrapeProfile(profileUrl) {
       });
       jobTitle = exp.jobTitle;
       company = exp.company;
-    } catch {}
+      console.log(`✅ Experience found: ${jobTitle} at ${company}`);
+    } catch (err) {
+      console.log("⚠️ Experience not found:", err.message);
+    }
 
     return {
       status: "success",
       data: { firstName, lastName, profilePhoto, jobTitle, company },
     };
-
   } catch (err) {
     console.error("❌ Scrape failed:", err);
     return defaultResponse;
