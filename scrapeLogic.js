@@ -104,16 +104,15 @@ async function autoScroll(page) {
   });
 }
 
-/** 🧠 HD PROFILE PHOTO EXTRACTOR (FINAL VERSION) */
+/** 🧠 ULTIMATE HD PROFILE PHOTO MODULE */
 async function getBestProfilePhoto(page) {
-  // 1️⃣ Get raw URL including ?e=...&t=...
+  // Extract image URL from page (JSON-LD preferred)
   let rawUrl = await page.evaluate(() => {
     try {
-      // Prefer JSON-LD (most reliable)
       const script = document.querySelector('script[type="application/ld+json"]');
       if (script) {
-        const json = JSON.parse(script.textContent);
-        if (json && json.image) return json.image;
+        const data = JSON.parse(script.textContent);
+        if (data?.image) return data.image;
       }
     } catch {}
 
@@ -136,34 +135,72 @@ async function getBestProfilePhoto(page) {
 
   if (!rawUrl) return "";
 
-  // Keep original query parameters
   const [baseUrl, params] = rawUrl.split("?");
 
-  // Replace only the shrink_XXX_XXX part
-  function build(size) {
-    return baseUrl.replace(/shrink_\d+_\d+/g, `shrink_${size}_${size}`) + (params ? `?${params}` : "");
-  }
+  const build = size =>
+    baseUrl.replace(/shrink_\d+_\d+/g, `shrink_${size}_${size}`) +
+    (params ? `?${params}` : "");
 
-  const url800 = build(800);
-  const url400 = build(400);
-  const url200 = build(200);
+  const img800 = build(800);
+  const img400 = build(400);
+  const img200 = build(200);
 
-  async function test(url) {
-    return await page.evaluate(async (u) => {
+  // Validate LinkedIn image response
+  async function validate(url) {
+    return await page.evaluate(async u => {
       try {
-        const r = await fetch(u, { method: "HEAD" });
-        return r.ok;
+        const r = await fetch(u, { method: "GET" });
+        if (!r.ok) return false;
+
+        const blob = await r.blob();
+        // 200x200 images are ~8–12 KB → reject them
+        if (blob.size < 15000) return false;
+
+        return true;
       } catch {
         return false;
       }
     }, url);
   }
 
-  if (await test(url800)) return url800;
-  if (await test(url400)) return url400;
-  if (await test(url200)) return url200;
+  // Try 800 first
+  if (await validate(img800)) return img800;
 
-  return rawUrl; // fallback
+  // Try 400
+  if (await validate(img400)) return img400;
+
+  // Try 200 (last chance)
+  if (await validate(img200)) return img200;
+
+  // 🚨 If all CDN attempts fail → take HD screenshot
+  const screenshot = await takeProfilePhotoScreenshot(page);
+  return screenshot || rawUrl;
+}
+
+/** 📸 HD SCREENSHOT FALLBACK */
+async function takeProfilePhotoScreenshot(page) {
+  try {
+    const selector = `
+      img.pv-top-card-profile-picture__image--show,
+      img.pv-top-card-profile-picture__image,
+      .pv-top-card__photo img
+    `;
+
+    const img = await page.$(selector);
+    if (!img) return "";
+
+    await page.setViewport({
+      width: 1500,
+      height: 1200,
+      deviceScaleFactor: 2,
+    });
+
+    const buffer = await img.screenshot({ type: "jpeg", quality: 90 });
+    return "data:image/jpeg;base64," + buffer.toString("base64");
+  } catch (err) {
+    console.log("⚠️ Screenshot fallback failed:", err.message);
+    return "";
+  }
 }
 
 /** Main scraper */
