@@ -163,6 +163,15 @@ export async function scrapeProfile(profileUrl) {
 
     // 🧠 Extract profile photo
     const profilePhoto = await page.evaluate(() => {
+      try {
+        const script = document.querySelector('script[type="application/ld+json"]');
+        if (script) {
+          const data = JSON.parse(script.textContent);
+          if (data && data.image) {
+            return data.image; // already full HD (usually 400–800px)
+          }
+        }
+      } catch (e) {}
       const img = document.querySelector(`
         img.pv-top-card-profile-picture__image--show,
         img.pv-top-card-profile-picture__image,
@@ -179,6 +188,9 @@ export async function scrapeProfile(profileUrl) {
       );
     });
 
+    if (profilePhoto) {
+      profilePhoto = profilePhoto.replace(/shrink_\d+_\d+/g, "shrink_800_800");
+    }
     // 🧠 Extract experience
     let jobTitle = "", company = "";
     try {
