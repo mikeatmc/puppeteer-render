@@ -162,71 +162,71 @@ export async function scrapeProfile(profileUrl) {
     const lastName = lastNameParts.join(" ");
 
     // 🧠 Extract HD profile photo
-    let profilePhoto = "";
-    
-    try {
-      // Ensure image is in view
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(800);
-    
-      // Try to click the profile picture
-      const imgSelector = `
-        img.pv-top-card-profile-picture__image--show,
-        img.pv-top-card-profile-picture__image,
-        .pv-top-card__photo img
-      `;
-    
-      const imgHandle = await page.$(imgSelector);
-    
-      if (imgHandle) {
-        await imgHandle.click({ delay: 120 });
-        console.log("🖼️ Opening profile photo viewer...");
-    
-        // Wait for HD modal image to load
-        await page.waitForSelector("img.ivm-view-attr__img--centered", {
-          timeout: 6000,
-        });
-    
-        profilePhoto = await page.evaluate(() => {
-          const hdImg = document.querySelector("img.ivm-view-attr__img--centered");
-          return hdImg?.src || "";
-        });
-    
-        if (profilePhoto) console.log("✅ HD profile photo extracted:", profilePhoto);
-      }
-    } catch (err) {
-      console.log("⚠️ Could not extract HD modal image:", err.message);
+    const rawUrl = await page.evaluate(() => {
+    const img = document.querySelector(`
+      img.pv-top-card-profile-picture__image--show,
+      img.pv-top-card-profile-picture__image,
+      .pv-top-card__photo img
+    `);
+    return (
+      img?.src ||
+      img?.getAttribute("data-delayed-url") ||
+      img?.getAttribute("data-src") ||
+      ""
+    );
+  });
+  
+  let profilePhoto = rawUrl;
+  
+  // Try to click the profile picture to open HD modal
+  try {
+    await page.click(`
+      img.pv-top-card-profile-picture__image--show,
+      img.pv-top-card-profile-picture__image
+    `);
+    await page.waitForSelector("img.ivm-view-attr__img--centered", { timeout: 5000 });
+  
+    const hd = await page.evaluate(() => {
+      const hdImg = document.querySelector("img.ivm-view-attr__img--centered");
+      return hdImg?.src || "";
+    });
+  
+    if (hd) {
+      profilePhoto = hd;
+      console.log("✅ Extracted HD from modal:", profilePhoto);
     }
-    
-    // Fallback: use the normal profile image if HD not found
-    if (!profilePhoto) {
-      console.log("🔄 Falling back to normal profile image...");
-    
-      const raw = await page.evaluate(() => {
-        const img = document.querySelector(`
-          img.pv-top-card-profile-picture__image--show,
-          img.pv-top-card-profile-picture__image,
-          img.profile-photo-edit__preview,
-          .pv-top-card__photo img,
-          img[alt*='profile picture']
-        `);
-    
-        return (
-          img?.src ||
-          img?.getAttribute("data-delayed-url") ||
-          img?.getAttribute("data-src") ||
-          ""
-        );
-      });
-    
-      // If LinkedIn gives a 200_200 URL -> upgrade to 400_400
-      if (raw.includes("_200_200")) {
-        profilePhoto = raw.replace("_200_200", "_400_400");
-        console.log("⬆️ Upgraded profile photo to 400x400:", profilePhoto);
-      } else {
-        profilePhoto = raw;
-      }
+  } catch (e) {
+    console.log("⚠️ Could not open HD photo modal:", e.message);
+  }
+  
+  // If no modal HD, try rewriting the URL properly
+  if (!profilePhoto.includes("_400_400")) {
+    if (rawUrl.match(/shrink_\d+_\d+/)) {
+      profilePhoto = rawUrl.replace(/shrink_\d+_\d+/, "shrink_400_400");
+      console.log("⬆️ Rewritten to 400×400:", profilePhoto);
     }
+  }
+  
+  // Optional: verify if the rewritten URL is working
+  try {
+    const ok = await page.evaluate(async (u) => {
+      try {
+        const r = await fetch(u, { method: "HEAD" });
+        return r.ok;
+      } catch {
+        return false;
+      }
+    }, profilePhoto);
+  
+    if (!ok) {
+      console.log("❗ Rewritten 400×400 URL did not pass HEAD check, falling back to raw");
+      profilePhoto = rawUrl;
+    }
+  } catch {}
+  
+  console.log("Final profilePhoto:", profilePhoto);
+    
+    
 
 
     // 🧠 Extract experience
