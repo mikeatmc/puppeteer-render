@@ -123,7 +123,7 @@ export async function scrapeProfile(profileUrl) {
 
   // ✅ PuppeteerExtra uses Puppeteer’s Chromium
   const browser = await puppeteerExtra.use(StealthPlugin()).launch({
-    headless: false,
+    headless: true,
     executablePath: puppeteer.executablePath(), // Puppeteer's built-in Chromium
     args: [
       "--no-sandbox",
