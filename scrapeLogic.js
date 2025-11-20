@@ -184,59 +184,43 @@ export async function scrapeProfile(profileUrl) {
     let jobTitle = "", company = "";
     try {
       const exp = await page.evaluate(() => {
-        // Find the experience anchor
-        const anchor = document.querySelector("#experience");
-        if (!anchor) return { jobTitle: "", company: "" };
-
-        // Experience section starts AFTER this anchor
-        const expRoot = anchor.parentElement;
-        if (!expRoot) return { jobTitle: "", company: "" };
-
-        // Select only experience items AFTER the "experience" anchor
-        const selectors = [
-          "#experience ~ div [data-view-name='profile-component-entity']",
-          "#experience ~ div .artdeco-list__item",
+        // Try different selectors LinkedIn uses for experience items
+        const expSelectors = [
+          ".artdeco-list__item",
+          "[data-view-name='profile-component-entity']",
         ];
 
-        let expItem = null;
+        for (const sel of expSelectors) {
+          const el = document.querySelector(sel);
+          if (el) {
+            // Find title (position)
+            const titleEl =
+                      el.querySelector("span[aria-hidden='true']") ||
+                      el.querySelector(".t-bold") ||
+                      el.querySelector(".t-14.t-normal");
+            const job = titleEl?.innerText?.trim() || "";
 
-        for (const sel of selectors) {
-          const found = document.querySelector(sel);
-          if (found) {
-            expItem = found;
-            break;
+            // Find company name
+            const companyEl =
+                      el.querySelector(".t-normal span[aria-hidden='true']") ||
+                      el.querySelector(".t-14.t-normal") ||
+                      el.querySelector("p.t-14") ||
+                      el.querySelector(".pv-entity__secondary-title");
+            let comp = companyEl?.innerText?.trim() || "";
+
+            // Cleanup extra text like "Full-time · 1 yr"
+            if (comp.includes("·")) comp = comp.split("·")[0].trim();
+
+            if (job || comp) return { jobTitle: job, company: comp };
           }
         }
 
-        if (!expItem) return { jobTitle: "", company: "" };
-
-        // Extract job title
-        const titleEl =
-                  expItem.querySelector("span[aria-hidden='true']") ||
-                  expItem.querySelector(".t-bold") ||
-                  expItem.querySelector(".t-14.t-normal");
-
-        const job = titleEl?.innerText?.trim() || "";
-
-        // Extract company name
-        const companyEl =
-                  expItem.querySelector(".t-normal span[aria-hidden='true']") ||
-                  expItem.querySelector(".t-14.t-normal") ||
-                  expItem.querySelector("p.t-14") ||
-                  expItem.querySelector(".pv-entity__secondary-title");
-
-        let comp = companyEl?.innerText?.trim() || "";
-
-        // Cleanup: remove "· Full-time", "· 1 yr" etc
-        if (comp.includes("·")) comp = comp.split("·")[0].trim();
-
-        return { jobTitle: job, company: comp };
+        return { jobTitle: "", company: "" };
       });
 
       jobTitle = exp.jobTitle;
       company = exp.company;
       console.log(`✅ Experience found: ${jobTitle} at ${company}`);
-
     } catch (err) {
       console.log("⚠️ Experience not found:", err.message);
     }
