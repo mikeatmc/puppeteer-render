@@ -123,7 +123,7 @@ export async function scrapeProfile(profileUrl) {
 
   // ✅ PuppeteerExtra uses Puppeteer’s Chromium
   const browser = await puppeteerExtra.use(StealthPlugin()).launch({
-    headless: true,
+    headless: false,
     executablePath: puppeteer.executablePath(), // Puppeteer's built-in Chromium
     args: [
       "--no-sandbox",
@@ -180,68 +180,65 @@ export async function scrapeProfile(profileUrl) {
       );
     });
 
-    // 🧠 Extract experience (Clean, Fast, Reliable)
-    let jobTitle = "";
-    let company = "";
-    
+    // 🧠 Extract experience
+    let jobTitle = "", company = "";
     try {
       const exp = await page.evaluate(() => {
-        try {
-          // Find the EXPERIENCE section wrapper
-          const expRoot = document.querySelector("#experience")?.parentElement;
-          if (!expRoot) return { jobTitle: "", company: "" };
-    
-          // Pick the FIRST (latest) experience item
-          const firstItem = expRoot.querySelector("[data-view-name='profile-component-entity']");
-          if (!firstItem) return { jobTitle: "", company: "" };
-    
-          // Extract job title
-          const job =
-            firstItem.querySelector(".t-bold span[aria-hidden='true']")?.innerText?.trim() ||
-            firstItem.querySelector(".t-bold")?.innerText?.trim() ||
-            firstItem.querySelector("span[aria-hidden='true']")?.innerText?.trim() ||
-            "";
-    
-          // Extract company name
-          let comp =
-            firstItem.querySelector(".t-14.t-normal span[aria-hidden='true']")?.innerText?.trim() ||
-            firstItem.querySelector(".t-14.t-normal")?.innerText?.trim() ||
-            "";
-    
-          // Remove "· Full-time", "· Internship", etc.
-          if (comp.includes("·")) comp = comp.split("·")[0].trim();
-    
-          return { jobTitle: job, company: comp };
-        } catch {
-          return { jobTitle: "", company: "" };
+        // Find the experience anchor
+        const anchor = document.querySelector("#experience");
+        if (!anchor) return { jobTitle: "", company: "" };
+
+        // Experience section starts AFTER this anchor
+        const expRoot = anchor.parentElement;
+        if (!expRoot) return { jobTitle: "", company: "" };
+
+        // Select only experience items AFTER the "experience" anchor
+        const selectors = [
+          "#experience ~ div [data-view-name='profile-component-entity']",
+          "#experience ~ div .artdeco-list__item",
+        ];
+
+        let expItem = null;
+
+        for (const sel of selectors) {
+          const found = document.querySelector(sel);
+          if (found) {
+            expItem = found;
+            break;
+          }
         }
-      });
-    
-      jobTitle = exp.jobTitle;
-      company = exp.company;
-    
-      console.log(`✅ Experience: ${jobTitle} at ${company}`);
-    } catch (err) {
-      console.log("⚠️ Experience extraction failed:", err.message);
-    
-      // 🔁 Backup minimal selector
-      const fallback = await page.evaluate(() => {
-        const first = document.querySelector("[data-view-name='profile-component-entity']");
-        if (!first) return { jobTitle: "", company: "" };
-    
-        const job =
-          first.querySelector("span[aria-hidden='true']")?.innerText?.trim() || "";
-    
-        let comp =
-          first.querySelector(".t-14.t-normal span[aria-hidden='true']")?.innerText?.trim() || "";
-    
+
+        if (!expItem) return { jobTitle: "", company: "" };
+
+        // Extract job title
+        const titleEl =
+                  expItem.querySelector("span[aria-hidden='true']") ||
+                  expItem.querySelector(".t-bold") ||
+                  expItem.querySelector(".t-14.t-normal");
+
+        const job = titleEl?.innerText?.trim() || "";
+
+        // Extract company name
+        const companyEl =
+                  expItem.querySelector(".t-normal span[aria-hidden='true']") ||
+                  expItem.querySelector(".t-14.t-normal") ||
+                  expItem.querySelector("p.t-14") ||
+                  expItem.querySelector(".pv-entity__secondary-title");
+
+        let comp = companyEl?.innerText?.trim() || "";
+
+        // Cleanup: remove "· Full-time", "· 1 yr" etc
         if (comp.includes("·")) comp = comp.split("·")[0].trim();
-    
+
         return { jobTitle: job, company: comp };
       });
-    
-      jobTitle = fallback.jobTitle;
-      company = fallback.company;
+
+      jobTitle = exp.jobTitle;
+      company = exp.company;
+      console.log(`✅ Experience found: ${jobTitle} at ${company}`);
+
+    } catch (err) {
+      console.log("⚠️ Experience not found:", err.message);
     }
 
 
