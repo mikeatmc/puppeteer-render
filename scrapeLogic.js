@@ -108,7 +108,6 @@ async function autoScroll(page) {
 async function extractHDPhotoFromModal(page) {
   try {
     console.log("🖼️ Opening profile photo modal...");
-
     const clickSelectors = [
       "button.profile-photo-edit__preview",
       ".pv-top-card__photo",
@@ -125,24 +124,18 @@ async function extractHDPhotoFromModal(page) {
         break;
       }
     }
-
     if (!clicked) {
       console.log("⚠️ No clickable profile picture found");
       return "";
     }
-
     // Wait for modal HD image
     await page.waitForSelector(".pv-member-photo-modal__content-image", {
       timeout: 8000,
     });
-
     const hdUrl = await page.evaluate(() => {
       const img = document.querySelector(".pv-member-photo-modal__content-image");
       return img?.src || img?.getAttribute("data-src") || "";
     });
-
-    console.log("📸 HD modal image URL:", hdUrl);
-
     return hdUrl;
   } catch (err) {
     console.log("❌ HD modal extraction failed:", err.message);
@@ -207,14 +200,12 @@ export async function scrapeProfile(profileUrl) {
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    // 🧠 Extract profile photo (safe version)
-    // 1️⃣ Try modal HD extraction
+    // 🧠 Extract HD profile photo from modal
     let profilePhoto = await extractHDPhotoFromModal(page);
     if (profilePhoto) {
       console.log("✅ Using TRUE HD modal photo");
     } else {
-      console.log("⚠️ Modal HD failed — trying top card image");
-      // 2️⃣ Extract raw profile photo from top-card
+      console.log("⚠️ Modal HD failed — using top card image");
       const rawUrl = await page.evaluate(() => {
         const img = document.querySelector(`
           img.pv-top-card-profile-picture__image--show,
@@ -231,32 +222,8 @@ export async function scrapeProfile(profileUrl) {
         );
       });
       profilePhoto = rawUrl;
-      console.log("👉 Found top card image:", rawUrl);
-      // 3️⃣ Try automatic 400×400 upgrade
-      if (rawUrl.includes("shrink_200_200")) {
-        const hdRewrite = rawUrl.replace("shrink_200_200", "shrink_400_400");
-        console.log("⬆️ Trying rewrite:", hdRewrite);
-        const valid = await page.evaluate(async (url) => {
-          try {
-            const res = await fetch(url, { method: "HEAD" });
-            return res.ok;
-          } catch {
-            return false;
-          }
-        }, hdRewrite);
-
-        if (valid) {
-          console.log("✅ Rewrite 400×400 is valid!");
-          profilePhoto = hdRewrite;
-        } else {
-          console.log("❌ Rewrite denied — fallback to raw");
-        }
-      }
     }
-    console.log("🎯 FINAL PROFILE PHOTO:", profilePhoto);
-    
-
-
+  
     // 🧠 Extract experience
     let jobTitle = "", company = "";
     try {
