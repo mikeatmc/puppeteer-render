@@ -161,71 +161,62 @@ export async function scrapeProfile(profileUrl) {
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    // 🧠 Extract HD profile photo
-    const rawUrl = await page.evaluate(() => {
-    const img = document.querySelector(`
-      img.pv-top-card-profile-picture__image--show,
-      img.pv-top-card-profile-picture__image,
-      .pv-top-card__photo img
-    `);
-    return (
-      img?.src ||
-      img?.getAttribute("data-delayed-url") ||
-      img?.getAttribute("data-src") ||
-      ""
-    );
-  });
-  
-  let profilePhoto = rawUrl;
-  
-  // Try to click the profile picture to open HD modal
-  try {
-    await page.click(`
-      img.pv-top-card-profile-picture__image--show,
-      img.pv-top-card-profile-picture__image
-    `);
-    await page.waitForSelector("img.ivm-view-attr__img--centered", { timeout: 5000 });
-  
-    const hd = await page.evaluate(() => {
-      const hdImg = document.querySelector("img.ivm-view-attr__img--centered");
-      return hdImg?.src || "";
-    });
-  
-    if (hd) {
-      profilePhoto = hd;
-      console.log("✅ Extracted HD from modal:", profilePhoto);
-    }
-  } catch (e) {
-    console.log("⚠️ Could not open HD photo modal:", e.message);
-  }
-  
-  // If no modal HD, try rewriting the URL properly
-  if (!profilePhoto.includes("_400_400")) {
-    if (rawUrl.match(/shrink_\d+_\d+/)) {
-      profilePhoto = rawUrl.replace(/shrink_\d+_\d+/, "shrink_400_400");
-      console.log("⬆️ Rewritten to 400×400:", profilePhoto);
-    }
-  }
-  
-  // Optional: verify if the rewritten URL is working
-  try {
-    const ok = await page.evaluate(async (u) => {
-      try {
-        const r = await fetch(u, { method: "HEAD" });
-        return r.ok;
-      } catch {
-        return false;
-      }
-    }, profilePhoto);
-  
-    if (!ok) {
-      console.log("❗ Rewritten 400×400 URL did not pass HEAD check, falling back to raw");
-      profilePhoto = rawUrl;
-    }
-  } catch {}
-  
-  console.log("Final profilePhoto:", profilePhoto);
+    // 🧠 Extract profile photo (safe version)
+    let profilePhoto = "";
     
+    // 1️⃣ Get REAL profile image from main card
+    const rawUrl = await page.evaluate(() => {
+      const img = document.querySelector(`
+        img.pv-top-card-profile-picture__image--show,
+        img.pv-top-card-profile-picture__image,
+        img.profile-photo-edit__preview,
+        .pv-top-card__photo img,
+        img[alt*='profile picture']
+      `);
+      return (
+        img?.src ||
+        img?.getAttribute("data-delayed-url") ||
+        img?.getAttribute("data-src") ||
+        ""
+      );
+    });
+    
+    profilePhoto = rawUrl;
+    console.log("👉 Real profile image:", profilePhoto);
+    
+    // Extract image ID pattern
+    const match = profilePhoto.match(/image\/v2\/([^/]+)\//);
+    const imageId = match ? match[1] : null;
+    
+    // If no ID → no HD possible
+    if (!imageId) {
+      console.log("⚠️ No image ID found, using original");
+    }
+    
+    // 2️⃣ Try HD version ONLY if URL contains shrink_200_200
+    if (imageId && profilePhoto.includes("shrink_200_200")) {
+      const hdUrl = profilePhoto.replace("shrink_200_200", "shrink_400_400");
+      console.log("⬆️ Attempting 400×400:", hdUrl);
+    
+      // Validate from inside the browser (HEAD request)
+      const valid = await page.evaluate(async (url) => {
+        try {
+          const res = await fetch(url, { method: "HEAD" });
+          return res.ok;
+        } catch {
+          return false;
+        }
+      }, hdUrl);
+    
+      if (valid) {
+        console.log("✅ 400×400 HD is valid");
+        profilePhoto = hdUrl;
+      } else {
+        console.log("❌ 400×400 rejected by LinkedIn, keeping 200×200");
+      }
+    }
+    
+    console.log("🎯 Final HD profilePhoto:", profilePhoto);
     
 
 
