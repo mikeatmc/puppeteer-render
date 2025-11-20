@@ -161,23 +161,73 @@ export async function scrapeProfile(profileUrl) {
     const [firstName, ...lastNameParts] = fullName.split(" ");
     const lastName = lastNameParts.join(" ");
 
-    // 🧠 Extract profile photo
-    const profilePhoto = await page.evaluate(() => {
-      const img = document.querySelector(`
+    // 🧠 Extract HD profile photo
+    let profilePhoto = "";
+    
+    try {
+      // Ensure image is in view
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(800);
+    
+      // Try to click the profile picture
+      const imgSelector = `
         img.pv-top-card-profile-picture__image--show,
         img.pv-top-card-profile-picture__image,
-        img.profile-photo-edit__preview,
-        .pv-top-card__photo img,
-        img[alt*='profile picture'],
-        .pv-top-card img
-      `);
-      return (
-        img?.src ||
-        img?.getAttribute("data-delayed-url") ||
-        img?.getAttribute("data-src") ||
-        ""
-      );
-    });
+        .pv-top-card__photo img
+      `;
+    
+      const imgHandle = await page.$(imgSelector);
+    
+      if (imgHandle) {
+        await imgHandle.click({ delay: 120 });
+        console.log("🖼️ Opening profile photo viewer...");
+    
+        // Wait for HD modal image to load
+        await page.waitForSelector("img.ivm-view-attr__img--centered", {
+          timeout: 6000,
+        });
+    
+        profilePhoto = await page.evaluate(() => {
+          const hdImg = document.querySelector("img.ivm-view-attr__img--centered");
+          return hdImg?.src || "";
+        });
+    
+        if (profilePhoto) console.log("✅ HD profile photo extracted:", profilePhoto);
+      }
+    } catch (err) {
+      console.log("⚠️ Could not extract HD modal image:", err.message);
+    }
+    
+    // Fallback: use the normal profile image if HD not found
+    if (!profilePhoto) {
+      console.log("🔄 Falling back to normal profile image...");
+    
+      const raw = await page.evaluate(() => {
+        const img = document.querySelector(`
+          img.pv-top-card-profile-picture__image--show,
+          img.pv-top-card-profile-picture__image,
+          img.profile-photo-edit__preview,
+          .pv-top-card__photo img,
+          img[alt*='profile picture']
+        `);
+    
+        return (
+          img?.src ||
+          img?.getAttribute("data-delayed-url") ||
+          img?.getAttribute("data-src") ||
+          ""
+        );
+      });
+    
+      // If LinkedIn gives a 200_200 URL -> upgrade to 400_400
+      if (raw.includes("_200_200")) {
+        profilePhoto = raw.replace("_200_200", "_400_400");
+        console.log("⬆️ Upgraded profile photo to 400x400:", profilePhoto);
+      } else {
+        profilePhoto = raw;
+      }
+    }
+
 
     // 🧠 Extract experience
     let jobTitle = "", company = "";
