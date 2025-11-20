@@ -104,6 +104,52 @@ async function autoScroll(page) {
   });
 }
 
+/** Try to extract HD modal profile image */
+async function extractHDPhotoFromModal(page) {
+  try {
+    console.log("🖼️ Opening profile photo modal...");
+
+    const clickSelectors = [
+      "button.profile-photo-edit__preview",
+      ".pv-top-card__photo",
+      "img.pv-top-card-profile-picture__image--show",
+      "img.pv-top-card-profile-picture__image"
+    ];
+
+    let clicked = false;
+    for (const sel of clickSelectors) {
+      const btn = await page.$(sel);
+      if (btn) {
+        await btn.click({ delay: 40 });
+        clicked = true;
+        break;
+      }
+    }
+
+    if (!clicked) {
+      console.log("⚠️ No clickable profile picture found");
+      return "";
+    }
+
+    // Wait for modal HD image
+    await page.waitForSelector(".pv-member-photo-modal__content-image", {
+      timeout: 8000,
+    });
+
+    const hdUrl = await page.evaluate(() => {
+      const img = document.querySelector(".pv-member-photo-modal__content-image");
+      return img?.src || img?.getAttribute("data-src") || "";
+    });
+
+    console.log("📸 HD modal image URL:", hdUrl);
+
+    return hdUrl;
+  } catch (err) {
+    console.log("❌ HD modal extraction failed:", err.message);
+    return "";
+  }
+}
+
 /** Main scraper */
 export async function scrapeProfile(profileUrl) {
   const defaultResponse = {
@@ -162,61 +208,52 @@ export async function scrapeProfile(profileUrl) {
     const lastName = lastNameParts.join(" ");
 
     // 🧠 Extract profile photo (safe version)
-    let profilePhoto = "";
-    
-    // 1️⃣ Get REAL profile image from main card
-    const rawUrl = await page.evaluate(() => {
-      const img = document.querySelector(`
-        img.pv-top-card-profile-picture__image--show,
-        img.pv-top-card-profile-picture__image,
-        img.profile-photo-edit__preview,
-        .pv-top-card__photo img,
-        img[alt*='profile picture']
-      `);
-      return (
-        img?.src ||
-        img?.getAttribute("data-delayed-url") ||
-        img?.getAttribute("data-src") ||
-        ""
-      );
-    });
-    
-    profilePhoto = rawUrl;
-    console.log("👉 Real profile image:", profilePhoto);
-    
-    // Extract image ID pattern
-    const match = profilePhoto.match(/image\/v2\/([^/]+)\//);
-    const imageId = match ? match[1] : null;
-    
-    // If no ID → no HD possible
-    if (!imageId) {
-      console.log("⚠️ No image ID found, using original");
-    }
-    
-    // 2️⃣ Try HD version ONLY if URL contains shrink_200_200
-    if (imageId && profilePhoto.includes("shrink_200_200")) {
-      const hdUrl = profilePhoto.replace("shrink_200_200", "shrink_400_400");
-      console.log("⬆️ Attempting 400×400:", hdUrl);
-    
-      // Validate from inside the browser (HEAD request)
-      const valid = await page.evaluate(async (url) => {
-        try {
-          const res = await fetch(url, { method: "HEAD" });
-          return res.ok;
-        } catch {
-          return false;
+    // 1️⃣ Try modal HD extraction
+    let profilePhoto = await extractHDPhotoFromModal(page);
+    if (profilePhoto) {
+      console.log("✅ Using TRUE HD modal photo");
+    } else {
+      console.log("⚠️ Modal HD failed — trying top card image");
+      // 2️⃣ Extract raw profile photo from top-card
+      const rawUrl = await page.evaluate(() => {
+        const img = document.querySelector(`
+          img.pv-top-card-profile-picture__image--show,
+          img.pv-top-card-profile-picture__image,
+          img.profile-photo-edit__preview,
+          .pv-top-card__photo img,
+          img[alt*='profile picture']
+        `);
+        return (
+          img?.src ||
+          img?.getAttribute("data-delayed-url") ||
+          img?.getAttribute("data-src") ||
+          ""
+        );
+      });
+      profilePhoto = rawUrl;
+      console.log("👉 Found top card image:", rawUrl);
+      // 3️⃣ Try automatic 400×400 upgrade
+      if (rawUrl.includes("shrink_200_200")) {
+        const hdRewrite = rawUrl.replace("shrink_200_200", "shrink_400_400");
+        console.log("⬆️ Trying rewrite:", hdRewrite);
+        const valid = await page.evaluate(async (url) => {
+          try {
+            const res = await fetch(url, { method: "HEAD" });
+            return res.ok;
+          } catch {
+            return false;
+          }
+        }, hdRewrite);
+
+        if (valid) {
+          console.log("✅ Rewrite 400×400 is valid!");
+          profilePhoto = hdRewrite;
+        } else {
+          console.log("❌ Rewrite denied — fallback to raw");
         }
-      }, hdUrl);
-    
-      if (valid) {
-        console.log("✅ 400×400 HD is valid");
-        profilePhoto = hdUrl;
-      } else {
-        console.log("❌ 400×400 rejected by LinkedIn, keeping 200×200");
       }
     }
-    
-    console.log("🎯 Final HD profilePhoto:", profilePhoto);
+    console.log("🎯 FINAL PROFILE PHOTO:", profilePhoto);
     
 
 
