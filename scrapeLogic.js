@@ -1,6 +1,5 @@
 import puppeteerExtra from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import puppeteer from "puppeteer";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,7 +9,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const cookiePath = path.join(__dirname, "cookies.json");
 
-// 🧠 Add stealth plugin (avoid LinkedIn bot detection)
 puppeteerExtra.use(StealthPlugin());
 
 /** Safe navigation with retries */
@@ -75,10 +73,10 @@ async function ensureLoggedIn(page, profileUrl) {
   const currentURL = page.url();
   const pageTitle = await page.title();
   if (
-      currentURL.includes("/login") ||
-      currentURL.includes("checkpoint") ||
-      pageTitle.toLowerCase().includes("sign in") ||
-      pageTitle.toLowerCase().includes("join linkedin")
+    currentURL.includes("/login") ||
+    currentURL.includes("checkpoint") ||
+    pageTitle.toLowerCase().includes("sign in") ||
+    pageTitle.toLowerCase().includes("join linkedin")
   ) {
     console.log("⚠️ Cookies invalid, performing fresh login...");
     const cookies = await loginAndSaveCookies(page);
@@ -121,10 +119,8 @@ export async function scrapeProfile(profileUrl) {
 
   if (!profileUrl) return defaultResponse;
 
-  // ✅ PuppeteerExtra uses Puppeteer’s Chromium
-  const browser = await puppeteerExtra.use(StealthPlugin()).launch({
+  const browser = await puppeteerExtra.launch({
     headless: true,
-    executablePath: puppeteer.executablePath(), // Puppeteer's built-in Chromium
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -132,7 +128,8 @@ export async function scrapeProfile(profileUrl) {
       "--disable-gpu",
       "--no-zygote",
       "--disable-extensions",
-      "--window-size=1920,1080"
+      "--single-process",
+      "--window-size=1920,1080",
     ],
   });
 
@@ -142,10 +139,12 @@ export async function scrapeProfile(profileUrl) {
     await page.setViewport({ width: 1366, height: 768 });
 
     await ensureLoggedIn(page, profileUrl);
+
+    // Scroll and wait for LinkedIn to load dynamic sections
     await autoScroll(page);
     await new Promise(r => setTimeout(r, 4000));
 
-    // 🧠 Extract name
+    // 🧠 Extract name (robust)
     const fullName = await page.evaluate(() => {
       const selectors = [
         "h1",
@@ -173,10 +172,10 @@ export async function scrapeProfile(profileUrl) {
         .pv-top-card img
       `);
       return (
-          img?.src ||
-          img?.getAttribute("data-delayed-url") ||
-          img?.getAttribute("data-src") ||
-          ""
+        img?.src ||
+        img?.getAttribute("data-delayed-url") ||
+        img?.getAttribute("data-src") ||
+        ""
       );
     });
 
@@ -184,47 +183,35 @@ export async function scrapeProfile(profileUrl) {
     let jobTitle = "", company = "";
     try {
       const exp = await page.evaluate(() => {
-        // Try different selectors LinkedIn uses for experience items
-        const expSelectors = [
-          ".artdeco-list__item",
+        const selectors = [
+          ".pvs-list__outer-container li",
           "[data-view-name='profile-component-entity']",
+          ".pv-entity__summary-info",
+          ".experience-item",
         ];
-
-        for (const sel of expSelectors) {
+        for (const sel of selectors) {
           const el = document.querySelector(sel);
           if (el) {
-            // Find title (position)
-            const titleEl =
-                      el.querySelector("span[aria-hidden='true']") ||
-                      el.querySelector(".t-bold") ||
-                      el.querySelector(".t-14.t-normal");
-            const job = titleEl?.innerText?.trim() || "";
-
-            // Find company name
+            const title =
+              el.querySelector(".t-bold span[aria-hidden]") ||
+              el.querySelector("span[dir='auto']");
             const companyEl =
-                      el.querySelector(".t-normal span[aria-hidden='true']") ||
-                      el.querySelector(".t-14.t-normal") ||
-                      el.querySelector("p.t-14") ||
-                      el.querySelector(".pv-entity__secondary-title");
+              el.querySelector(".t-normal span[aria-hidden]") ||
+              el.querySelector(".t-14.t-normal");
+            let job = title?.innerText?.trim() || "";
             let comp = companyEl?.innerText?.trim() || "";
-
-            // Cleanup extra text like "Full-time · 1 yr"
             if (comp.includes("·")) comp = comp.split("·")[0].trim();
-
-            if (job || comp) return { jobTitle: job, company: comp };
+            return { jobTitle: job, company: comp };
           }
         }
-
         return { jobTitle: "", company: "" };
       });
-
       jobTitle = exp.jobTitle;
       company = exp.company;
       console.log(`✅ Experience found: ${jobTitle} at ${company}`);
     } catch (err) {
       console.log("⚠️ Experience not found:", err.message);
     }
-
 
     return {
       status: "success",
